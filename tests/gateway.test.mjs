@@ -28,3 +28,11 @@ test('truncated stream does not repeat a partially delivered answer',async()=>{l
 test('SSRF and credential-in-URL inputs are rejected',()=>{for(const url of ['http://x.example.org','https://localhost','https://127.0.0.1/v1','https://user:pass@example.org/v1','https://metadata.internal/v1','https://[::1]/v1','https://example.org:444/v1'])assert.throws(()=>validBase(url));assert.equal(validBase('https://api.example.org/v1/'),'https://api.example.org/v1');});
 test('AES ciphertext cannot be decrypted under another server key',async()=>{const c=await seal('secret',randomKey());assert.notEqual(c.data,'secret');await assert.rejects(()=>unseal(c,randomKey()));});
 test('invalid model and oversized output never consume quota',async()=>{const f=await fixture(()=>completion());assert.equal((await f.gateway(f.req({model:'wrong',messages:[{role:'user',content:'hi'}]}))).status,400);assert.equal((await f.gateway(f.req({model:'fast',messages:[{role:'user',content:'hi'}],max_tokens:99999}))).status,400);assert.equal(f.records.length,0);});
+test('Workers AI monitor uses native model-search endpoint and cannot access administration',async()=>{
+ const secret=randomKey(),monitor=randomKey(),key=await seal(randomKey(),secret);let endpoint;
+ const db={async table(name){if(name==='settings')return[{monitor_hash:await digest(monitor)}];if(name==='providers')return[{id:'cf',kind:'cloudflare',base_url:'https://api.cloudflare.com/client/v4/accounts/'+'a'.repeat(32)+'/ai/v1',secret_cipher:key}];return[];},async rpc(){}};
+ const gateway=createGateway({SUPABASE_SERVICE_ROLE_KEY:secret},{db,fetcher:async url=>{endpoint=url;return Response.json({success:true,result:[]});}});
+ const r=await gateway(new Request('https://gateway.example.org/internal/health',{method:'POST',headers:{authorization:'Bearer '+monitor}}));
+ assert.equal(r.status,200);assert.ok(endpoint.endsWith('/ai/models/search?per_page=1'));
+ const denied=await gateway(new Request('https://gateway.example.org/admin/overview',{headers:{authorization:'Bearer '+monitor}}));assert.equal(denied.status,401);
+});

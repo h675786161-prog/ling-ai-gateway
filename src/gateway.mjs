@@ -90,7 +90,8 @@ export function createGateway(env,options={}) {
     const start=Date.now();let status=0;
     try {validBase(p.base_url,p.kind);await verifyDNS(new URL(p.base_url).hostname,options.resolveDNS);
       const key=await unseal(p.secret_cipher,env.ENCRYPTION_KEY||env.SUPABASE_SERVICE_ROLE_KEY);
-      const r=await fetcher(p.base_url+'/models',{headers:{authorization:'Bearer '+key},signal:AbortSignal.timeout(8000),redirect:'error'});
+      const endpoint=p.kind==='cloudflare'?p.base_url.replace(/\/v1$/,'')+'/models/search?per_page=1':p.base_url+'/models';
+      const r=await fetcher(endpoint,{headers:{authorization:'Bearer '+key},signal:AbortSignal.timeout(8000),redirect:'error'});
       status=r.status;await r.body?.cancel();
     }catch{}
     await persist('provider_result',{p_provider:p.id,p_status:status,p_latency:Date.now()-start,p_success:status>=200&&status<300,p_health:true,p_retry:0});
@@ -125,7 +126,7 @@ export function createGateway(env,options={}) {
     }
     if(path==='/admin/health'&&req.method==='POST') {
       const b=await readJSON(req,2048);const rows=await db.table('providers','?enabled=eq.true');
-      return reply({checks:await Promise.all(rows.filter(p=>p.secret_cipher&&(!b.id||p.id===b.id)).map(health)),note:'检查 /models 连通性；不消耗聊天推理额度，也不证明某个模型可生成。'});
+      return reply({checks:await Promise.all(rows.filter(p=>p.secret_cipher&&(!b.id||p.id===b.id)).map(health)),note:'检查厂商模型列表的连通性；不消耗聊天推理额度，也不证明某个模型可生成。'});
     }
     if(path==='/admin/reset-circuit'&&req.method==='POST') {
       const b=await readJSON(req,2048);if(!/^[a-f0-9-]{36}$/.test(b.id||''))return error('invalid_id');
@@ -162,6 +163,7 @@ export function createGateway(env,options={}) {
     return error('not_found',404);
   }
   async function chat(req,auth) {
+    const deadline=Date.now()+110000;
     const b=await readJSON(req);
     if(!ALIASES.includes(b.model))return error('unknown_model');
     if(!Array.isArray(b.messages)||!b.messages.length||b.messages.length>1000||b.messages.some(m=>!m||!['system','developer','user','assistant','tool','function'].includes(m.role)))return error('invalid_messages');
@@ -178,11 +180,11 @@ export function createGateway(env,options={}) {
     async function finish(status,usage) {if(settled)return;await persist('finish',{p_log:reservation.id,p_status:status,p_attempts:attempts,p_prompt:usage?.prompt_tokens??null,p_completion:usage?.completion_tokens??null});settled=true;}
     let tried=0;
     for(const p of providers) {
-      if(tried>=3)break;
+      if(tried>=3||Date.now()>=deadline)break;
       if(!await db.rpc('claim',{p_provider:p.id,p_admin:auth.user.role==='admin'}))continue;
       tried++;const start=Date.now(),controller=new AbortController();
       const disconnect=()=>controller.abort();req.signal.addEventListener('abort',disconnect,{once:true});
-      let timer=setTimeout(()=>controller.abort(),options.firstTimeout||18000),up,streamStarted=false;
+      let timer=setTimeout(()=>controller.abort(),Math.max(1,Math.min(options.firstTimeout||18000,deadline-Date.now()))),up,streamStarted=false;
       const cleanup=()=>{clearTimeout(timer);req.signal.removeEventListener('abort',disconnect);};
       try {
         validBase(p.base_url,p.kind);await verifyDNS(new URL(p.base_url).hostname,options.resolveDNS);
@@ -214,7 +216,7 @@ export function createGateway(env,options={}) {
           }
           // Wait for a valid OpenAI chunk BEFORE sending headers. Errors here may fail over.
           while(!pending.length){const item=await reader.read();if(item.done)throw new Error('empty_upstream_stream');pending.push(...frames(decoder.decode(item.value,{stream:true})));}
-          cleanup();req.signal.addEventListener('abort',disconnect,{once:true});timer=setTimeout(()=>controller.abort(),Math.max(1000,110000-(Date.now()-start)));
+          cleanup();req.signal.addEventListener('abort',disconnect,{once:true});timer=setTimeout(()=>controller.abort(),Math.max(1,deadline-Date.now()));
           attempts.push({provider_id:p.id,status:200,latency_ms:Date.now()-start});streamStarted=true;
           let complete=false;
           async function end(success) {if(complete)return;complete=true;cleanup();
