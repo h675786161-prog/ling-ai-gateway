@@ -1,0 +1,10 @@
+name = "ling-ai-gateway"
+main = "src/worker.mjs"
+compatibility_date = "2026-10-07"
+workers_dev = true
+[vars]
+GATEWAY_ORIGIN = "https://ibpffxzdjvgydnhmvmvc.supabase.co/functions/v1/ling-ai-gateway"
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/v1/*", "/admin/*", "/health"]

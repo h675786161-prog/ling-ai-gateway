@@ -1,0 +1,3 @@
+project_id = "ling-ai-gateway"
+[functions.ling-ai-gateway]
+verify_jwt = false
