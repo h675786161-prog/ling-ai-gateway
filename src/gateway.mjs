@@ -249,7 +249,7 @@ export function createGateway(env,options={}) {
   }
   return async req => {
     try {
-      const url=new URL(req.url);let path=url.pathname.replace(/^\/functions\/v1\/ling-ai-gateway/,'').replace(/\/$/,'')||'/';
+      const url=new URL(req.url);let path=url.pathname.replace(/^(?:\/functions\/v1)?\/ling-ai-gateway(?=\/|$)/,'').replace(/\/$/,'')||'/';
       if(req.method==='OPTIONS')return cors(new Response(null,{status:204}));
       if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.1.0'}));
       if(path==='/internal/health'&&req.method==='POST') {
