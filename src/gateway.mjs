@@ -1,3 +1,4 @@
+import {createModelChecks} from './model-checks.mjs';
 export const ALIASES = ['fast','smart','rp','backup'];
 const encoder = new TextEncoder();
 const DAY = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -35,9 +36,9 @@ async function verifyDNS(host,resolver) {
 }
 export class DB {
   constructor(env,fetcher=fetch) {this.env=env;this.fetcher=fetcher;}
-  async request(path,method='GET',body) {
+  async request(path,method='GET',body,extraHeaders={}) {
     const k=this.env.SUPABASE_SERVICE_ROLE_KEY;
-    const r=await this.fetcher(this.env.SUPABASE_URL+'/rest/v1/'+path,{method,headers:{apikey:k,...(k.startsWith('eyJ')?{authorization:'Bearer '+k}:{}),'content-type':'application/json',Prefer:'return=representation'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(10000)});
+    const r=await this.fetcher(this.env.SUPABASE_URL+'/rest/v1/'+path,{method,headers:{apikey:k,...(k.startsWith('eyJ')?{authorization:'Bearer '+k}:{}),'content-type':'application/json',Prefer:'return=representation',...extraHeaders},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(10000)});
     if(!r.ok) throw new Error('database_unavailable');
     if(r.status===204)return null;
     return r.json();
@@ -71,6 +72,7 @@ function safeProvider(p,usage) {
 export function createGateway(env,options={}) {
   const db=options.db||new DB(env,options.fetcher);
   const fetcher=options.fetcher||fetch;
+  const modelChecks=createModelChecks({db,fetcher,validBase,resolveDNS:options.resolveDNS,verifyDNS,unseal,digest,secret:env.ENCRYPTION_KEY||env.SUPABASE_SERVICE_ROLE_KEY});
   const persist=async(name,args)=> {for(let n=0;n<2;n++){try{return await db.rpc(name,args);}catch(e){if(n===1)throw e;}}};
   async function authenticate(req,admin=false) {
     const raw=(req.headers.get('authorization')||'').match(/^Bearer (\S+)$/)?.[1];
@@ -99,6 +101,13 @@ export function createGateway(env,options={}) {
   }
   async function admin(req,path,auth) {
     const user=auth.user;
+    if(path==='/admin/models'&&req.method==='GET')return reply(await modelChecks.list(new URL(req.url).searchParams.get('provider_id')));
+    if(path.startsWith('/admin/models/')&&req.method==='POST'){
+      const b=await readJSON(req,32768);
+      if(path==='/admin/models/discover')return reply(await modelChecks.discover(b.provider_id));
+      if(path==='/admin/models/add')return reply(await modelChecks.add(b.provider_id,b.models));
+      if(path==='/admin/models/probe')return reply(await modelChecks.probe(b.provider_id,b.model_id,b.timeout_seconds??12,req.signal));
+    }
     if(path==='/admin/overview'&&req.method==='GET') {
       const [providers,usage,users,keys,logs,settings,userUsage]=await Promise.all([
         db.table('providers','?order=priority.asc'),db.table('provider_usage','?day=eq.'+DAY()),db.table('users','?order=created_at.asc'),
@@ -253,7 +262,7 @@ export function createGateway(env,options={}) {
     try {
       const url=new URL(req.url);let path=url.pathname.replace(/^(?:\/functions\/v1)?\/ling-ai-gateway(?=\/|$)/,'').replace(/\/$/,'')||'/';
       if(req.method==='OPTIONS')return cors(new Response(null,{status:204}));
-      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.1.0'}));
+      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.2.0'}));
       if(path==='/internal/health'&&req.method==='POST') {
         const token=(req.headers.get('authorization')||'').match(/^Bearer (\S+)$/)?.[1];
         const settings=(await db.table('settings'))[0];
@@ -279,6 +288,10 @@ export function createGateway(env,options={}) {
         if(path==='/v1/chat/completions'&&req.method==='POST')return cors(await chat(req,auth));
       }
       return cors(error('not_found',404));
-    }catch(e){return cors(error(['invalid_json','body_too_large','invalid_provider_url','unsafe_provider_address'].includes(e.message)?e.message:'gateway_unavailable',e.message==='body_too_large'?413:['invalid_json','invalid_provider_url','unsafe_provider_address'].includes(e.message)?400:503));}
+    }catch(e){
+      const inputErrors=['invalid_json','invalid_id','invalid_models','invalid_probe_timeout','invalid_provider_url','unsafe_provider_address','provider_key_required','provider_not_found','openrouter_free_models_only'];
+      const publicErrors=[...inputErrors,'body_too_large','invalid_model_catalog','catalog_too_large'];
+      return cors(error(publicErrors.includes(e.message)||/^model_catalog_http_\d+$/.test(e.message)?e.message:'gateway_unavailable',e.message==='body_too_large'?413:inputErrors.includes(e.message)?400:503));
+    }
   };
 }

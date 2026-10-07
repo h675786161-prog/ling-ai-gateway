@@ -1,0 +1,53 @@
+begin;
+create temporary table model_check_results(name text,passed boolean);
+do $$
+declare p uuid; a jsonb;b jsonb;old_lease uuid;new_lease uuid;requests integer;
+begin
+ insert into public.ling_gateway_providers(name,kind,base_url,secret_cipher,enabled,rpm_limit)
+ values('__transaction_model_test','custom','https://test.example.org/v1','{"test_only":true}',false,100) returning id into p;
+ perform public.ling_gateway_model_catalog(p,'[{"id":"a","name":"A"},{"id":"b","name":"B"},{"id":"c","name":"C"}]');
+ if exists(select 1 from public.ling_gateway_models where provider_id=p and status<>'unchecked') then raise exception 'catalog falsely marks usable';end if;
+ insert into model_check_results values('catalog is not proof of generation',true);
+ a:=public.ling_gateway_probe_claim(p,'a');
+ if a->>'lease' is null then raise exception 'disabled testing station refused';end if;
+ if public.ling_gateway_probe_claim(p,'a')->>'error'<>'probe_busy' then raise exception 'duplicate probe allowed';end if;
+ b:=public.ling_gateway_probe_claim(p,'b');
+ if public.ling_gateway_probe_claim(p,'c')->>'error'<>'probe_busy' then raise exception 'concurrency exceeded';end if;
+ select q.requests into requests from public.ling_gateway_provider_usage q where provider_id=p;
+ if requests<>2 then raise exception 'busy probe spent quota';end if;
+ insert into model_check_results values('disabled station, one lease per model, max two probes',true);
+ if public.ling_gateway_probe_finish(gen_random_uuid(),'error',500,1,'hash') then raise exception 'unclaimed result accepted';end if;
+ if not public.ling_gateway_probe_finish((a->>'lease')::uuid,'available',200,15,'hash','real-a') then raise exception 'result not persisted';end if;
+ if public.ling_gateway_probe_finish((a->>'lease')::uuid,'error',500,1,'hash') then raise exception 'duplicate completion accepted';end if;
+ if (select status from public.ling_gateway_models where provider_id=p and model_id='a')<>'available' then raise exception 'late result overwrote status';end if;
+ insert into model_check_results values('results persist only for the matching live lease',true);
+ update public.ling_gateway_models set status='timeout',checked_at=now()-interval '1 hour' where provider_id=p and model_id='b';
+ perform public.ling_gateway_probe_finish((b->>'lease')::uuid,'cancelled',0,1,'hash');
+ if (select status from public.ling_gateway_models where provider_id=p and model_id='b')<>'timeout' then raise exception 'cancel overwrote earlier result';end if;
+ insert into model_check_results values('stopping retains earlier finished results',true);
+ perform public.ling_gateway_model_catalog(p,'[{"id":"a","name":"Renamed A"},{"id":"c","name":"C"}]');
+ if (select status from public.ling_gateway_models where provider_id=p and model_id='a')<>'available' or (select listed from public.ling_gateway_models where provider_id=p and model_id='b') then raise exception 'catalog invalidated history';end if;
+ insert into model_check_results values('refresh catalog preserves results and hides removed models',true);
+ a:=public.ling_gateway_probe_claim(p,'c');old_lease:=(a->>'lease')::uuid;
+ update public.ling_gateway_models set lease_until=now()-interval '1 second' where provider_id=p and model_id='c';
+ a:=public.ling_gateway_probe_claim(p,'c');new_lease:=(a->>'lease')::uuid;
+ if new_lease=old_lease or public.ling_gateway_probe_finish(old_lease,'available',200,1,'hash') then raise exception 'expired lease overwrite';end if;
+ perform public.ling_gateway_probe_finish(new_lease,'not_found',404,1,'hash');
+ insert into model_check_results values('expired probes recover without accepting old replies',true);
+ select q.requests into requests from public.ling_gateway_provider_usage q where provider_id=p;
+ update public.ling_gateway_providers set rpm_limit=1 where id=p;
+ if public.ling_gateway_probe_claim(p,'a')->>'error'<>'provider_minute_limit' then raise exception 'minute limit ignored';end if;
+ update public.ling_gateway_providers set rpm_limit=100,daily_limit=requests where id=p;
+ if public.ling_gateway_probe_claim(p,'a')->>'error'<>'provider_daily_limit' then raise exception 'daily limit ignored';end if;
+ if (select q.requests from public.ling_gateway_provider_usage q where provider_id=p)<>requests then raise exception 'blocked probe spent quota';end if;
+ insert into model_check_results values('checks share provider daily and minute request limits',true);
+ update public.ling_gateway_providers set secret_cipher=null where id=p;
+ if public.ling_gateway_probe_claim(p,'a')->>'error'<>'provider_key_required' then raise exception 'missing key accepted';end if;
+ insert into model_check_results values('missing credentials prevent checks',true);
+ if not (select relrowsecurity from pg_class where oid='public.ling_gateway_models'::regclass)
+ or has_table_privilege('anon','public.ling_gateway_models','select') or has_table_privilege('authenticated','public.ling_gateway_models','select') then raise exception 'public table access';end if;
+ if exists(select 1 from pg_proc join pg_namespace ns on ns.oid=pronamespace where ns.nspname='public' and proname in ('ling_gateway_model_catalog','ling_gateway_probe_claim','ling_gateway_probe_finish') and (prosecdef or has_function_privilege('anon',pg_proc.oid,'execute') or has_function_privilege('authenticated',pg_proc.oid,'execute'))) then raise exception 'public RPC access';end if;
+ insert into model_check_results values('RLS enabled and table/RPC restricted to backend',true);
+end $$;
+select * from model_check_results;
+rollback;
