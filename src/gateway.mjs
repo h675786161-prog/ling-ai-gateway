@@ -1,4 +1,6 @@
 import {createModelChecks} from './model-checks.mjs';
+import {createModelDirectory,configurationHash} from './model-directory.mjs';
+import {createFanout} from './fanout.mjs';
 export const ALIASES = ['fast','smart','rp','backup'];
 const encoder = new TextEncoder();
 const DAY = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -52,6 +54,7 @@ function error(code,status=400) {return reply({error:{message:code,type:'gateway
 function cors(response) {
   const h=new Headers(response.headers);
   h.set('access-control-allow-origin','*');h.set('access-control-allow-headers','authorization,content-type');h.set('access-control-allow-methods','GET,POST,PATCH,DELETE,OPTIONS');
+  h.set('access-control-expose-headers','x-gateway-request-id');
   h.set('x-content-type-options','nosniff');h.set('referrer-policy','no-referrer');
   return new Response(response.body,{status:response.status,headers:h});
 }
@@ -74,6 +77,8 @@ export function createGateway(env,options={}) {
   const fetcher=options.fetcher||fetch;
   const modelChecks=createModelChecks({db,fetcher,validBase,resolveDNS:options.resolveDNS,verifyDNS,unseal,digest,secret:env.ENCRYPTION_KEY||env.SUPABASE_SERVICE_ROLE_KEY});
   const persist=async(name,args)=> {for(let n=0;n<2;n++){try{return await db.rpc(name,args);}catch(e){if(n===1)throw e;}}};
+  const directory=createModelDirectory({db,digest});
+  const fanout=createFanout({db,fetcher,validBase,verifyDNS,resolveDNS:options.resolveDNS,unseal,secret:env.ENCRYPTION_KEY||env.SUPABASE_SERVICE_ROLE_KEY,digest,configurationHash,persist,reply,error,firstTimeout:options.firstTimeout,totalTimeout:options.totalTimeout});
   async function authenticate(req,admin=false) {
     const raw=(req.headers.get('authorization')||'').match(/^Bearer (\S+)$/)?.[1];
     if(!raw)return null;
@@ -101,11 +106,13 @@ export function createGateway(env,options={}) {
   }
   async function admin(req,path,auth) {
     const user=auth.user;
+    if(path==='/admin/model-directory'&&req.method==='GET')return reply(await directory.list(false));
     if(path==='/admin/models'&&req.method==='GET')return reply(await modelChecks.list(new URL(req.url).searchParams.get('provider_id')));
     if(path.startsWith('/admin/models/')&&req.method==='POST'){
       const b=await readJSON(req,32768);
       if(path==='/admin/models/discover')return reply(await modelChecks.discover(b.provider_id));
       if(path==='/admin/models/add')return reply(await modelChecks.add(b.provider_id,b.models));
+      if(path==='/admin/models/map')return reply(await modelChecks.map(b.provider_id,b.model_id,b.canonical_id));
       if(path==='/admin/models/probe')return reply(await modelChecks.probe(b.provider_id,b.model_id,b.timeout_seconds??12,req.signal));
     }
     if(path==='/admin/overview'&&req.method==='GET') {
@@ -174,13 +181,14 @@ export function createGateway(env,options={}) {
   async function chat(req,auth) {
     const deadline=Date.now()+110000;
     const b=await readJSON(req);
-    if(!ALIASES.includes(b.model))return error('unknown_model');
+    if(typeof b.model!=='string'||!b.model||b.model.length>200)return error('unknown_model');
     if(!Array.isArray(b.messages)||!b.messages.length||b.messages.length>1000||b.messages.some(m=>!m||!['system','developer','user','assistant','tool','function'].includes(m.role)))return error('invalid_messages');
     if(b.stream!==undefined&&typeof b.stream!=='boolean')return error('invalid_stream');
-    if(b.n!==undefined&&b.n!==1)return error('only_n_1_supported');
+    if(b.n!==undefined&&(!Number.isInteger(b.n)||b.n<1||b.n>1000))return error('invalid_n');
     const settings=(await db.table('settings'))[0];
     const limit=b.max_completion_tokens??b.max_tokens??settings.max_output_tokens;
     if(!Number.isInteger(limit)||limit<1||limit>settings.max_output_tokens)return error('max_tokens_exceeded');
+    if(!ALIASES.includes(b.model)){const selected=await directory.routes(b.model);if(!selected.routes.length)return error('unknown_model');return fanout.chat(req,auth,{...b,model:selected.id},selected.routes,limit);}
     const providers=(await db.table('providers','?enabled=eq.true&order=priority.asc,created_at.asc')).filter(p=>p.aliases[b.model]&&p.secret_cipher);
     if(!providers.length)return error('no_provider_configured',503);
     const reservation=await db.rpc('reserve',{p_user:auth.user.id,p_model:b.model});
@@ -262,7 +270,7 @@ export function createGateway(env,options={}) {
     try {
       const url=new URL(req.url);let path=url.pathname.replace(/^(?:\/functions\/v1)?\/ling-ai-gateway(?=\/|$)/,'').replace(/\/$/,'')||'/';
       if(req.method==='OPTIONS')return cors(new Response(null,{status:204}));
-      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.2.0'}));
+      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.3.0'}));
       if(path==='/internal/health'&&req.method==='POST') {
         const token=(req.headers.get('authorization')||'').match(/^Bearer (\S+)$/)?.[1];
         const settings=(await db.table('settings'))[0];
@@ -284,12 +292,13 @@ export function createGateway(env,options={}) {
       if(path.startsWith('/v1/')) {
         const auth=await authenticate(req);if(!auth)return cors(error('unauthorized',401));
         if(auth.user.role!=='admin'&&!(await db.table('settings'))[0].public_enabled)return cors(error('public_closed',403));
-        if(path==='/v1/models'&&req.method==='GET')return cors(reply({object:'list',data:ALIASES.map(id=>({id,object:'model',created:1791331200,owned_by:'ling'}))}));
+        if(path==='/v1/models'&&req.method==='GET')return cors(reply(await directory.list()));
+        if(path.startsWith('/v1/replies/')&&req.method==='GET')return cors(await fanout.getReplies(path.slice('/v1/replies/'.length),auth));
         if(path==='/v1/chat/completions'&&req.method==='POST')return cors(await chat(req,auth));
       }
       return cors(error('not_found',404));
     }catch(e){
-      const inputErrors=['invalid_json','invalid_id','invalid_models','invalid_probe_timeout','invalid_provider_url','unsafe_provider_address','provider_key_required','provider_not_found','openrouter_free_models_only'];
+      const inputErrors=['invalid_json','invalid_id','invalid_models','invalid_canonical_model','model_not_registered','invalid_probe_timeout','invalid_provider_url','unsafe_provider_address','provider_key_required','provider_not_found','openrouter_free_models_only'];
       const publicErrors=[...inputErrors,'body_too_large','invalid_model_catalog','catalog_too_large'];
       return cors(error(publicErrors.includes(e.message)||/^model_catalog_http_\d+$/.test(e.message)?e.message:'gateway_unavailable',e.message==='body_too_large'?413:inputErrors.includes(e.message)?400:503));
     }

@@ -1,3 +1,4 @@
+import {canonicalName,canonicalID,modelRows} from './model-directory.mjs';
 // Real per-model checks: never use the gateway's failover router during a probe.
 export const MODEL_STATES={available:'可用',timeout:'超时',rate_limited:'限流',unauthorized:'没有权限',not_found:'模型不存在',unsupported:'请求不支持',empty:'没有文字',network_error:'连接失败',error:'上游报错',no_credit:'余额不足',unchecked:'未检查'};
 export function modelEndpoint(provider) {
@@ -74,10 +75,12 @@ export function createModelChecks({db,fetcher,validBase,resolveDNS,verifyDNS,uns
  async function list(p){const rows=await db.table('models','?provider_id=eq.'+p.id+'&listed=eq.true&order=model_id.asc&limit=1000'),current=await hash(p);return rows.map(({config_hash,lease_token,lease_until,...r})=>({...r,stale:!!config_hash&&config_hash!==current,checking:!!lease_until&&Date.parse(lease_until)>Date.now()}));}
  return {
   async list(id){return {models:await list(await provider(id))};},
-  async discover(id){const p=await provider(id),key=await prepare(p),models=await discoverModels(p,key,fetcher);await db.rpc('model_catalog',{p_provider:id,p_models:models});return {models:await list(p),catalog_count:models.length};},
+  async discover(id){const p=await provider(id),key=await prepare(p),models=(await discoverModels(p,key,fetcher)).map(m=>({...m,canonical_id:canonicalName(m.id,p.kind,p.name)}));await db.rpc('model_catalog',{p_provider:id,p_models:models});return {models:await list(p),catalog_count:models.length};},
   async add(id,models){const p=await provider(id);if(!Array.isArray(models)||!models.length||models.length>100||models.some(m=>!modelOK(m)))throw new Error('invalid_models');
    if(p.kind==='openrouter'&&models.some(m=>m!=='openrouter/free'&&!m.endsWith(':free')))throw new Error('openrouter_free_models_only');
-   await db.request('ling_gateway_models?on_conflict=provider_id,model_id','POST',[...new Set(models)].map(m=>({provider_id:id,model_id:m,name:m,listed:true,source:'manual'})),{Prefer:'resolution=merge-duplicates,return=representation'});return {models:await list(p)};},
+   const existing=await modelRows(db,'?provider_id=eq.'+id);
+   await db.request('ling_gateway_models?on_conflict=provider_id,model_id','POST',[...new Set(models)].map(m=>{const old=existing.find(x=>x.model_id===m);return {provider_id:id,model_id:m,name:m,listed:true,source:'manual',canonical_id:old?.canonical_source==='manual'?old.canonical_id:canonicalName(m,p.kind,p.name)};}),{Prefer:'resolution=merge-duplicates,return=representation'});return {models:await list(p)};},
+  async map(id,model,canonical){await provider(id);if(!modelOK(model))throw new Error('invalid_models');const value=canonical===null||canonical===''?null:canonicalID(canonical);const rows=await db.write('models','PATCH',{canonical_id:value,canonical_source:'manual'},'?provider_id=eq.'+id+'&model_id=eq.'+encodeURIComponent(model));if(!rows.length)throw new Error('model_not_registered');return {models:await list(await provider(id))};},
   async probe(id,model,timeout,signal){const p=await provider(id);if(!modelOK(model))throw new Error('invalid_models');if(!Number.isInteger(timeout)||timeout<5||timeout>30)throw new Error('invalid_probe_timeout');
    if(p.kind==='openrouter'&&model!=='openrouter/free'&&!model.endsWith(':free'))throw new Error('openrouter_free_models_only');
    const key=await prepare(p),version=await hash(p),claim=await db.rpc('probe_claim',{p_provider:id,p_model:model});

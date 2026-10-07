@@ -1,6 +1,31 @@
 # 玲的统一 AI 入口
 
-一个自用优先的 OpenAI-compatible 网关，登录后首先进入模型检查页面。默认部署使用 GitHub Pages + 已有 Supabase 免费项目；不需要常开电脑。代码公开，管理页有门禁，数据库不允许浏览器直接访问。
+一个自用优先的 OpenAI-compatible 网关，登录后首先进入模型检查页面。各站点的模型分别统计，在酒馆合并成不带站点前后缀的模型目录；发送同一条消息时，各匹配站点分别生成，保留所有候选回复。默认部署使用 GitHub Pages + 已有 Supabase 免费项目；不需要常开电脑。代码公开，管理页有门禁，数据库不允许浏览器直接访问。
+
+## 官方模型目录与多站回复
+
+例如三个站点分别叫 `gemini-2.5-flash`、`google/gemini-2.5-flash`、`站点名称/gemini-2.5-flash`，归并后酒馆的 `/v1/models` 只出现一个 `gemini-2.5-flash`。后台仍保留各站原始名称，调用时替换回该站接受的 ID。站点别名不会写进回复正文。
+
+- 读取各站目录后，常见模型家族、供应商命名空间、OpenRouter 的 `:free` 和已知站点名称前后缀会自动归并。日期、版本和参数规模保持分开。
+- 特殊叫法可以点击该模型的“归并”，填官方名称；多个站点填写相同名称就会汇入同一项。留空则从酒馆目录隐藏。手动设置在后续刷新目录时保留。无法可靠识别的名称先留在后台，等待手动归并。
+- 后台显示每站的原始名称、酒馆名称、实测结果、延迟、HTTP 状态；“酒馆拉取的模型目录”汇总注册站点数、启用线路数和实测可用线路数。
+- 酒馆目录只包含已启用且已填密钥的线路。未测试或上次失败的模型也可列出，后续调用可以再次尝试恢复；“已列出”不代表“已经实测可用”。
+- 请求官方名称时，每个匹配站点最多调用一次。最快出现正文的回复作为第 1 条，其他回复依次作为第 2、3 条等；所有成功和部分输出都保存。失败、冷却或额度不足的站点记录原因，不产生空白候选。
+- 本站聊天页可以点击“回复 1 / 2 / 3”查看，并以当前选择的回复继续下一轮。调用记录中可重新查看本人所有候选回复。
+
+## 酒馆填写
+
+- 管理页：https://h675786161-prog.github.io/ling-ai-gateway/
+- API URL / Base URL：`https://ibpffxzdjvgydnhmvmvc.supabase.co/functions/v1/ling-ai-gateway/v1`
+- API Key：在“密钥与配额”生成的应用密钥。
+- 模型：从拉取的目录选择官方名称，例如 `gemini-2.5-flash`；具体可用项取决于你已经登记和启用的站点。
+- 管理访问码：与现有自用网站相同；不记录在仓库或说明中。
+
+选择“聊天补全 → 自定义（OpenAI-compatible）”，填写上述地址与应用密钥，连接后拉取模型。使用流式输出时，在聊天补全设置中将 **Multiple swipes per generation（每次生成多条回复）设为 2 或更高**。这用于开启酒馆对候选回复的接收；后台仍按匹配站点数量收集全部回复，填写 2 也可以收到 3 条或更多。已经用 SillyTavern 1.18.0 隔离实例实测第 2、3 条的显示与左右切换。
+
+其他只支持单条流式回复的客户端可以保留 `n: 1`；第一条正常显示，其他回复仍可在本网关查看。非流式 JSON 返回标准 `choices` 数组中的全部候选。旧客户端的 `fast/smart/rp/backup` 仍保留顺序故障切换兼容，但不再出现在模型列表。
+
+普通用户需由管理员创建，并手动开启分享；应用密钥不能进入管理后台。上游线路变化不需要修改客户端地址。
 
 ## 批量检查模型
 
@@ -15,31 +40,19 @@
 
 结果按站点和模型分开保存。更换站点地址、类型或密钥后，原结果显示“需重测”，不再计入可用数量。模型目录、角色/推理片段、心跳、成功的 HTTP 头或空回复都不会单独证明可用。OpenRouter 免费站点只检查免费模型；自定义站点可能包含付费模型，请按自己的额度检查。
 
-## 使用
-
-- 管理页：https://h675786161-prog.github.io/ling-ai-gateway/
-- Base URL：`https://ibpffxzdjvgydnhmvmvc.supabase.co/functions/v1/ling-ai-gateway/v1`
-- 模型：`fast`、`smart`、`rp`、`backup`
-- 管理访问码：与现有自用网站相同；不记录在仓库或说明中。
-- 在“我的线路”填写一条新的上游密钥、真实模型名称，勾选启用。
-- 在“密钥与配额”生成自己的应用密钥，复制到 SillyTavern 的自定义 OpenAI-compatible 连接。
-- 应用密钥仅用于模型调用，不能进入管理后台。普通用户需由管理员创建，并手动开启分享。
-
-SillyTavern：选择聊天补全 → 自定义 OpenAI-compatible，API URL 填上述 Base URL，API Key 填网关签发的密钥，模型选择上述别名。上游线路变化不需要修改客户端。
-
 ## 行为
 
 - `GET /v1/models` 与 `POST /v1/chat/completions`，包含 SSE 流式输出。
 - 三类官方线路模板：Gemini OpenAI-compatible API、OpenRouter 免费池、Cloudflare Workers AI；也支持自定义 HTTPS OpenAI-compatible 服务。
 - Gemini 模板名称是配置起点，不保证当前账号或地区具有免费额度；请按账号实际可用模型修改。OpenRouter 免费类型只允许 `openrouter/free` 或 `:free` 模型。
-- 按优先级选择线路；单次最多尝试 3 条。429、401/403/404、5xx、网络故障和首个有效响应前的超时可尝试下一条。请求参数错误（400）直接返回。
-- 429 进入至少 60 秒冷却，尊重 Retry-After（上限一天）。连续 3 次网络/服务错误后冷却 30 秒，继续失败则延长，最高 300 秒。401/403/404 冷却 10 分钟。冷却后只允许一个恢复探测；真实调用成功后关闭熔断。模型列表健康检查不会覆盖真实推理熔断。
-- 首次响应等待上限 18 秒，整次请求（含故障切换与流式输出）总时长约 110 秒；适合短中等对话。超长推理可能超过免费 Edge Function 的生命周期。已经输出部分内容后不重试，以免重复回答。
+- 官方名称向所有匹配且已启用的站点并行发出请求，一条站点失败不影响其他站点。用户一次发送计一次站内调用；每条实际上游请求分别占该站的 RPM、每日次数和 token 额度。三个匹配站点就是三次上游生成，不会因为使用统一入口而绕过厂商限额。
+- 429 进入至少 60 秒冷却，尊重 Retry-After（上限一天）。连续 3 次网络/服务错误后冷却 30 秒，继续失败则延长，最高 300 秒。401 冷却 10 分钟；某个模型的 403/404 只记录该模型失败，不会熔断整个站点。冷却后只允许一个恢复探测；真实调用成功后关闭熔断。模型列表健康检查不会覆盖真实推理熔断。
+- 每站等待首段正文最多 18 秒，生成总时长约 100 秒，之后结算并保存；适合短中等对话。角色片段、心跳、纯推理不会假装成第一段文字。超长推理可能超过等待时间。已经收到的部分输出保留，并标记中断。
 - 用户按北京时间每日限额，最多同时 2 个请求。线路按每日调用次数及每分钟调用次数限流，并为管理员预留部分每日容量。管理员默认不限制站内日次数，仍遵守线路限制及厂商额度。
 - 调用完全失败退还用户站内次数；线路尝试次数不退还。部分输出中断仍算一次。异常终止超过 5 分钟的挂起记录由定时任务修复。
 - 页面显示的“剩余”是站内请求上限，不是厂商真实余额。CF AI 的 Neurons、模型 token 预算等不能换算为准确请求次数。
 - 每小时第 17 分钟检查最多 12 条已启用线路的模型列表（普通线路 `/models`，Workers AI `/ai/models/search`），不发送推理请求。管理页也可手动检查。只检查连通性和鉴权，不证明模型可生成。
-- 不保存对话正文。日志包含用户 ID、模型别名、每次尝试的线路/status/latency，以及上游报告的 tokens；只保留最近 30 天。页面聊天仅保留在当前页面内存。
+- 不保存输入提示词。按用户要求，候选回复正文、来源站点、原始模型名、状态和 token 用量在私有后端保留 30 天；本人认证后才能读取。删除过期调用记录会同时删除候选正文。页面聊天历史保存在当前页面内存；退出清空。酒馆自身保存的聊天不受本网关 30 天清理影响。
 
 ## 安全
 
@@ -61,7 +74,9 @@ npm test
 npm run dev
 ```
 
-数据库结构在 `supabase/schema.sql`，新增模型检查表及并发/配额 RPC 在 `supabase/model-checks.sql`，通过 Supabase migration API 应用并记录迁移历史；不要对已部署数据库重复执行脚本。`src/edge.ts`、`src/gateway.mjs` 和 `src/model-checks.mjs` 一起部署为 `ling-ai-gateway` Edge Function。必须关闭平台 JWT 验证，因为本项目采用自身 API key 验证，所有管理和模型接口均独立鉴权。
+数据库结构依次为 `supabase/schema.sql`、`supabase/model-checks.sql`、`supabase/model-fanout.sql`，通过 Supabase migration API 应用并记录迁移历史；不要对已部署数据库重复执行脚本。最后一份增加官方名称映射、私有候选回复和按模型错误处理的统计 RPC。`tests/schema-fanout.sql` 是可回滚的数据库不变量检查。
+
+`src/edge.ts`、`src/gateway.mjs`、`src/model-checks.mjs`、`src/model-directory.mjs` 和 `src/fanout.mjs` 一起部署为 `ling-ai-gateway` Edge Function。必须关闭平台 JWT 验证，因为本项目采用自身 API key 验证，所有管理和模型接口均独立鉴权。`GET /v1/replies/{request_id}` 仅返回本人的保存结果；流式响应的 `x-gateway-request-id` 和结束摘要均包含该 ID。
 
 GitHub Actions 部署 `public/` 到 Pages。公开文件只有页面程序和公开后端地址。
 
@@ -71,6 +86,6 @@ GitHub Actions 部署 `public/` 到 Pages。公开文件只有页面程序和公
 
 本项目没有启用付费订阅、域名或付费模型。现有 Supabase 项目确认使用 Free 计划，容量与其他网站共享；免费配额、项目暂停政策及上游账号额度仍然适用，不承诺无限或永久免费。
 
-成熟的 [New API](https://github.com/QuantumNous/new-api) 支持更多协议、计费和用户管理，但需要持续运行后端程序。当前方案针对无常开服务器、无需电脑在线的 Supabase 云端部署。以后可把模型别名保持不变，迁移到 New API。
+成熟的 [New API](https://github.com/QuantumNous/new-api) 支持更多协议、计费和用户管理，但需要持续运行后端程序。当前方案针对无常开服务器、无需电脑在线的 Supabase 云端部署。以后迁移时可继续保留官方模型名称与统一连接方式。
 
 官方接口参考：[Gemini](https://ai.google.dev/gemini-api/docs/openai)、[OpenRouter Free](https://openrouter.ai/docs/guides/routing/model-variants/free)、[Workers AI](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/)、[Supabase 定时任务](https://supabase.com/docs/guides/functions/schedule-functions)。
