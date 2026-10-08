@@ -5,4 +5,4 @@ const resolveDNS = async (host: string) => {
   const results = await Promise.allSettled([Deno.resolveDns(host,'A'),Deno.resolveDns(host,'AAAA')]);
   return results.flatMap(r=>r.status==='fulfilled'?r.value:[]);
 };
-Deno.serve(createGateway(env,{resolveDNS,totalTimeout:145000}));
+Deno.serve(createGateway(env,{resolveDNS,totalTimeout:140000}));
