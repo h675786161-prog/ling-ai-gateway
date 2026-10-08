@@ -30,3 +30,12 @@ test('management overview and settings responses never send gate or monitor hash
     assert.equal(response.status,200);const settings=(await response.json()).settings;assert.equal(settings.access_code_hash,undefined);assert.equal(settings.monitor_hash,undefined);assert.ok(settings.routing_mode);
   }
 });
+test('admin can remove the output cap and optionally save caps above the previous 32768 ceiling',async()=>{
+ const f=await fixture();
+ for(const value of [65536,131072,null]){
+  const response=await f.admin('/admin/settings','PATCH',{max_output_tokens:value});assert.equal(response.status,200);assert.equal((await response.json()).settings.max_output_tokens,value);
+  assert.equal((await (await f.admin('/admin/overview')).json()).settings.max_output_tokens,value);
+ }
+ for(const value of [0,-1,1.5,'65536',9007199254740992])assert.equal((await f.admin('/admin/settings','PATCH',{max_output_tokens:value})).status,400);
+ assert.equal((await (await f.admin('/admin/overview')).json()).settings.max_output_tokens,null);
+});

@@ -1,12 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createGateway,digest,randomKey,seal,unseal,validBase} from '../src/gateway.mjs';
-async function fixture(fetcher,role='admin') {
+async function fixture(fetcher,role='admin',settings={}) {
  const token=randomKey(),keyHash=await digest(token),secret=randomKey(),cipher=await seal(randomKey(),secret);
  const providers=[1,2,3].map(n=>({id:'provider-'+n,name:'test-'+n,enabled:true,kind:'custom',base_url:'https://p'+n+'.example.org/v1',secret_cipher:cipher,aliases:{fast:'upstream-'+n},priority:n}));
  const records=[],results=[],claims=[];
  const user={id:'user-1',role,enabled:true};
- const db={async table(name,query=''){if(name==='keys')return query.includes(keyHash)?[{id:'key-1',user_id:user.id,admin_access:false,enabled:true}]:[];if(name==='users')return[user];if(name==='settings')return[{public_enabled:true,max_output_tokens:4096}];if(name==='providers')return providers;return[];},async rpc(name,args){if(name==='reserve')return{id:'log-1'};if(name==='claim'){claims.push(args);return true;}if(name==='finish'){records.push(args);return;}if(name==='provider_result'){results.push(args);return;}}};
+ const db={async table(name,query=''){if(name==='keys')return query.includes(keyHash)?[{id:'key-1',user_id:user.id,admin_access:false,enabled:true}]:[];if(name==='users')return[user];if(name==='settings')return[{public_enabled:true,max_output_tokens:4096,...settings}];if(name==='providers')return providers;return[];},async rpc(name,args){if(name==='reserve')return{id:'log-1'};if(name==='claim'){claims.push(args);return true;}if(name==='finish'){records.push(args);return;}if(name==='provider_result'){results.push(args);return;}}};
  const gateway=createGateway({SUPABASE_SERVICE_ROLE_KEY:secret},{db,fetcher,firstTimeout:25});
  const req=(body={model:'fast',messages:[{role:'user',content:'hi'}]},t=token,path='/v1/chat/completions')=>new Request('https://gateway.example.org'+path,{method:path.endsWith('models')?'GET':'POST',headers:{authorization:'Bearer '+t,'content-type':'application/json'},body:path.endsWith('models')?undefined:JSON.stringify(body)});
  return {gateway,req,db,records,results,providers,claims};
@@ -28,6 +28,28 @@ test('truncated stream does not repeat a partially delivered answer',async()=>{l
 test('SSRF and credential-in-URL inputs are rejected',()=>{for(const url of ['http://x.example.org','https://localhost','https://127.0.0.1/v1','https://user:pass@example.org/v1','https://metadata.internal/v1','https://[::1]/v1','https://example.org:444/v1'])assert.throws(()=>validBase(url));assert.equal(validBase('https://api.example.org/v1/'),'https://api.example.org/v1');});
 test('AES ciphertext cannot be decrypted under another server key',async()=>{const c=await seal('secret',randomKey());assert.notEqual(c.data,'secret');await assert.rejects(()=>unseal(c,randomKey()));});
 test('invalid model and oversized output never consume quota',async()=>{const f=await fixture(()=>completion());assert.equal((await f.gateway(f.req({model:'wrong',messages:[{role:'user',content:'hi'}]}))).status,400);assert.equal((await f.gateway(f.req({model:'fast',messages:[{role:'user',content:'hi'}],max_tokens:99999}))).status,400);assert.equal(f.records.length,0);});
+test('unlimited legacy route forwards large client limits and leaves unspecified limits to upstream',async()=>{
+ const payloads=[],f=await fixture(async(_url,options)=>{payloads.push(JSON.parse(options.body));return completion();},'admin',{max_output_tokens:null});
+ for(const parameters of [{max_tokens:65536},{max_completion_tokens:131072},{},{max_tokens:null,max_completion_tokens:null},{max_tokens:65536,max_completion_tokens:131072}]){
+  assert.equal((await f.gateway(f.req({model:'fast',messages:[{role:'user',content:'hi'}],...parameters}))).status,200);
+ }
+ assert.equal(payloads[0].max_tokens,65536);assert.equal(payloads[1].max_completion_tokens,131072);assert.ok(!('max_tokens' in payloads[1]));
+ for(const payload of payloads.slice(2,4)){assert.ok(!('max_tokens' in payload));assert.ok(!('max_completion_tokens' in payload));}
+ assert.equal(payloads[4].max_completion_tokens,131072);assert.ok(!('max_tokens' in payloads[4]));
+});
+test('unlimited output still rejects invalid client token fields before charging quota',async()=>{
+ let calls=0;const f=await fixture(()=>{calls++;return completion();},'admin',{max_output_tokens:null});
+ for(const field of ['max_tokens','max_completion_tokens'])for(const value of [0,-1,1.5,'65536',9007199254740992]){
+  const r=await f.gateway(f.req({model:'fast',messages:[{role:'user',content:'hi'}],[field]:value}));assert.equal(r.status,400);assert.equal((await r.json()).error.code,'invalid_'+field);
+ }
+ assert.equal(calls,0);assert.equal(f.claims.length,0);assert.equal(f.records.length,0);
+});
+test('legacy SSE route handles many valid frames in a transport chunk larger than 1 MB',async()=>{
+ const content='long answer '.repeat(90),frames=('data: '+JSON.stringify({choices:[{index:0,delta:{content}}]})+'\n\n').repeat(1100);
+ const f=await fixture(()=>new Response(frames+'data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}}),'admin',{max_output_tokens:null});
+ const response=await f.gateway(f.req({model:'fast',messages:[{role:'user',content:'hi'}],stream:true,max_tokens:131072}));assert.equal(response.status,200);
+ const body=await response.text();assert.ok(body.length>1048576);assert.ok(body.endsWith('data: [DONE]\n\n'));assert.equal(f.records[0].p_status,'success');
+});
 test('Workers AI monitor uses native model-search endpoint and cannot access administration',async()=>{
  const secret=randomKey(),monitor=randomKey(),key=await seal(randomKey(),secret);let endpoint;
  const db={async table(name){if(name==='settings')return[{monitor_hash:await digest(monitor)}];if(name==='providers')return[{id:'cf',kind:'cloudflare',base_url:'https://api.cloudflare.com/client/v4/accounts/'+'a'.repeat(32)+'/ai/v1',secret_cipher:key}];return[];},async rpc(){}};

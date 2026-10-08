@@ -33,18 +33,18 @@ export function createFanout({db,fetcher,validBase,verifyDNS,resolveDNS,unseal,s
     controller=new AbortController();controllers.add(controller);timer=setTimeout(()=>{expired=true;controller.abort();},Math.max(1,Math.min(firstTimeout,deadline-Date.now())));
     validBase(p.base_url,p.kind);await verifyDNS(new URL(p.base_url).hostname,resolveDNS);const key=await unseal(p.secret_cipher,secret);
     const payload={...b,model:route.model_id,stream:true};delete payload.user;delete payload.n;delete payload.gateway;
-    if(payload.max_completion_tokens===undefined)payload.max_tokens=limit;
+    if(payload.max_completion_tokens===undefined&&limit!==undefined)payload.max_tokens=limit;
     const up=await fetcher(p.base_url+'/chat/completions',{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify(payload),signal:controller.signal,redirect:'error'});r.http_status=up.status;
     if(!up.ok){const value=up.headers.get('retry-after');retry=/^\d+$/.test(value||'')?Number(value):Math.max(0,Math.ceil((Date.parse(value||'')-Date.now())/1000))||0;await up.body?.cancel();r.reason='http_'+up.status;return;}
     reader=up.body?.getReader();if(!reader)throw new Error('empty_response');const decoder=new TextDecoder();let buffer='',bytes=0,done=false;
     if(!up.headers.get('content-type')?.includes('text/event-stream')){
-     while(true){const chunk=await reader.read();if(chunk.done)break;bytes+=chunk.value.length;if(bytes>1048576)throw new Error('response_too_large');buffer+=decoder.decode(chunk.value,{stream:true});}
+     while(true){const chunk=await reader.read();if(chunk.done)break;bytes+=chunk.value.length;if(bytes>16777216)throw new Error('response_too_large');buffer+=decoder.decode(chunk.value,{stream:true});}
      const obj=JSON.parse(buffer);if(obj.error)throw new Error('upstream_error');const choice=obj.choices?.find(c=>c.index===0)||obj.choices?.[0];if(!choice?.message)throw new Error('invalid_response');r.returned_model=typeof obj.model==='string'?obj.model.slice(0,200):null;r.usage=obj.usage||null;r.finish_reason=choice.finish_reason||'stop';merge(choice.message);complete=!!visible(r.message);
     }else{
-     while(!done){const chunk=await reader.read();if(chunk.done)break;bytes+=chunk.value.length;if(bytes>1048576)throw new Error('response_too_large');buffer+=decoder.decode(chunk.value,{stream:true});buffer=buffer.replace(/\r\n/g,'\n');let at;
-      while((at=buffer.indexOf('\n\n'))>=0){const raw=buffer.slice(0,at);buffer=buffer.slice(at+2);const data=raw.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');if(!data)continue;if(data==='[DONE]'){done=true;complete=!!visible(r.message);break;}const obj=JSON.parse(data);if(obj.error)throw new Error('upstream_error');if(typeof obj.model==='string')r.returned_model=obj.model.slice(0,200);if(obj.usage)r.usage=obj.usage;
+     while(!done){const chunk=await reader.read();if(chunk.done)break;buffer+=decoder.decode(chunk.value,{stream:true});buffer=buffer.replace(/\r\n/g,'\n');let at;
+      while((at=buffer.indexOf('\n\n'))>=0){if(at>1048576)throw new Error('response_too_large');const raw=buffer.slice(0,at);buffer=buffer.slice(at+2);const data=raw.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');if(!data)continue;if(data==='[DONE]'){done=true;complete=!!visible(r.message);break;}const obj=JSON.parse(data);if(obj.error)throw new Error('upstream_error');if(typeof obj.model==='string')r.returned_model=obj.model.slice(0,200);if(obj.usage)r.usage=obj.usage;
        const choice=obj.choices?.find(c=>c.index===0)||obj.choices?.[0];if(choice){merge(choice.delta||choice.message||{});if(choice.finish_reason){r.finish_reason=choice.finish_reason;complete=!!visible(r.message);}}
-      }
+      }if(buffer.length>1048576)throw new Error('response_too_large');
      }
     }
     r.status=complete?'success':visible(r.message)?'partial':'failed';if(!complete)r.reason=visible(r.message)?'stream_interrupted':'empty_response';

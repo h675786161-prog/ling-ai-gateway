@@ -154,7 +154,8 @@ export function createGateway(env,options={}) {
     }
     if(path==='/admin/settings'&&req.method==='PATCH') {
       const b=await readJSON(req,2048),data={};
-      for(const [f,min,max] of [['default_daily_limit',0,100000],['owner_reserve',0,100000],['max_output_tokens',64,32768]])if(b[f]!==undefined){if(!Number.isInteger(b[f])||b[f]<min||b[f]>max)return error('invalid_'+f);data[f]=b[f];}
+      for(const [f,min,max] of [['default_daily_limit',0,100000],['owner_reserve',0,100000]])if(b[f]!==undefined){if(!Number.isInteger(b[f])||b[f]<min||b[f]>max)return error('invalid_'+f);data[f]=b[f];}
+      if(b.max_output_tokens!==undefined){if(b.max_output_tokens!==null&&(!Number.isSafeInteger(b.max_output_tokens)||b.max_output_tokens<1))return error('invalid_max_output_tokens');data.max_output_tokens=b.max_output_tokens;}
       if(b.routing_mode!==undefined){if(!ROUTING_MODES.includes(b.routing_mode))return error('invalid_routing_mode');data.routing_mode=b.routing_mode;}
       if(b.hedge_delay_ms!==undefined){if(!Number.isInteger(b.hedge_delay_ms)||b.hedge_delay_ms<1000||b.hedge_delay_ms>30000)return error('invalid_hedge_delay');data.hedge_delay_ms=b.hedge_delay_ms;}
       if(b.multi_reply_limit!==undefined){if(!Number.isInteger(b.multi_reply_limit)||(b.multi_reply_limit!==0&&(b.multi_reply_limit<2||b.multi_reply_limit>20)))return error('invalid_multi_reply_limit');data.multi_reply_limit=b.multi_reply_limit;}
@@ -193,8 +194,13 @@ export function createGateway(env,options={}) {
     if(b.stream!==undefined&&typeof b.stream!=='boolean')return error('invalid_stream');
     if(b.n!==undefined&&(!Number.isInteger(b.n)||b.n<1||b.n>1000))return error('invalid_n');
     const settings=(await db.table('settings'))[0];
-    const limit=b.max_completion_tokens??b.max_tokens??settings.max_output_tokens;
-    if(!Number.isInteger(limit)||limit<1||limit>settings.max_output_tokens)return error('max_tokens_exceeded');
+    for(const field of ['max_tokens','max_completion_tokens']){
+      if(b[field]===null)delete b[field];
+      else if(b[field]!==undefined&&(!Number.isSafeInteger(b[field])||b[field]<1))return error('invalid_'+field);
+    }
+    const limit=b.max_completion_tokens??b.max_tokens??settings.max_output_tokens??undefined;
+    if(settings.max_output_tokens!=null&&limit>settings.max_output_tokens)return error('max_tokens_exceeded');
+    if(b.max_completion_tokens!==undefined)delete b.max_tokens;
     if(!ALIASES.includes(b.model)){const selected=await directory.routes(b.model);if(!selected.routes.length)return error('unknown_model');return fanout.chat(req,auth,{...b,model:selected.id},selected.routes,limit,settings);}
     const providers=(await db.table('providers','?enabled=eq.true&order=priority.asc,created_at.asc')).filter(p=>p.aliases[b.model]&&p.secret_cipher);
     if(!providers.length)return error('no_provider_configured',503);
@@ -214,7 +220,7 @@ export function createGateway(env,options={}) {
         validBase(p.base_url,p.kind);await verifyDNS(new URL(p.base_url).hostname,options.resolveDNS);
         const key=await unseal(p.secret_cipher,env.ENCRYPTION_KEY||env.SUPABASE_SERVICE_ROLE_KEY);
         const payload={...b,model:p.aliases[b.model]};
-        if(b.max_completion_tokens===undefined)payload.max_tokens=limit;
+        if(b.max_completion_tokens===undefined&&limit!==undefined)payload.max_tokens=limit;
         delete payload.user; // Do not send local user identifiers upstream.
         up=await fetcher(p.base_url+'/chat/completions',{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify(payload),signal:controller.signal,redirect:'error'});
         if(!up.ok) {
@@ -229,14 +235,14 @@ export function createGateway(env,options={}) {
           if(!up.headers.get('content-type')?.includes('text/event-stream')||!up.body)throw new Error('invalid_upstream_stream');
           const reader=up.body.getReader(),decoder=new TextDecoder();let buffer='',pending=[],doneMarker=false,usage;
           function frames(text) {
-            buffer+=text;buffer=buffer.replace(/\r\n/g,'\n');if(buffer.length>1048576)throw new Error('upstream_frame_too_large');
+            buffer+=text;buffer=buffer.replace(/\r\n/g,'\n');
             let at;const result=[];
-            while((at=buffer.indexOf('\n\n'))>=0){const frame=buffer.slice(0,at);buffer=buffer.slice(at+2);const data=frame.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');
+            while((at=buffer.indexOf('\n\n'))>=0){if(at>1048576)throw new Error('upstream_frame_too_large');const frame=buffer.slice(0,at);buffer=buffer.slice(at+2);const data=frame.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');
               if(!data)continue;if(data==='[DONE]'){doneMarker=true;result.push('data: [DONE]\n\n');continue;}
               const obj=JSON.parse(data);if(obj.error)throw new Error('upstream_stream_error');
               if(!Array.isArray(obj.choices))throw new Error('invalid_upstream_chunk');
               obj.model=b.model;if(obj.usage)usage=obj.usage;result.push('data: '+JSON.stringify(obj)+'\n\n');}
-            return result;
+            if(buffer.length>1048576)throw new Error('upstream_frame_too_large');return result;
           }
           // Wait for a valid OpenAI chunk BEFORE sending headers. Errors here may fail over.
           while(!pending.length){const item=await reader.read();if(item.done)throw new Error('empty_upstream_stream');pending.push(...frames(decoder.decode(item.value,{stream:true})));}
@@ -277,7 +283,7 @@ export function createGateway(env,options={}) {
     try {
       const url=new URL(req.url);let path=url.pathname.replace(/^(?:\/functions\/v1)?\/ling-ai-gateway(?=\/|$)/,'').replace(/\/$/,'')||'/';
       if(req.method==='OPTIONS')return cors(new Response(null,{status:204}));
-      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.5.0'}));
+      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.5.1'}));
       if(path==='/internal/health'&&req.method==='POST') {
         const token=(req.headers.get('authorization')||'').match(/^Bearer (\S+)$/)?.[1];
         const settings=(await db.table('settings'))[0];

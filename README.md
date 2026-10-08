@@ -28,6 +28,10 @@
 
 ## 酒馆填写
 
+网关默认不限制每次输出 token 数。在“密钥与配额”勾选“输出长度不限（网关）”即可解除站内限制，酒馆设置的 `max_tokens` / `max_completion_tokens` 原样传给上游；两者同时出现时以 `max_completion_tokens` 为准。客户端未设置时，网关不再强加 4,096 的默认值，由上游选择默认长度。需要给分享用户控制输出时，可以取消勾选并填写正整数上限，没有原先的 32,768 设置限制。
+
+上游仍可能按模型能力、上下文和账号额度限制输出。流式回复不再按累计 1 MB 截断；单个异常 SSE 帧仍有 1 MB 保护，忽略流式参数的 JSON 回复最多 16 MB。云端请求超时仍然有效。
+
 - 管理页：https://h675786161-prog.github.io/ling-ai-gateway/
 - API URL / Base URL：`https://ibpffxzdjvgydnhmvmvc.supabase.co/functions/v1/ling-ai-gateway/v1`
 - API Key：在“密钥与配额”生成的应用密钥。

@@ -14,6 +14,38 @@ async function fixture(fetcher,count=4,settings={routing_mode:'parallel',multi_r
  const req=(b={model,messages:[{role:'user',content:'fixture'}]},path='/v1/chat/completions')=>new Request('https://gateway.example.org'+path,{method:path==='/v1/chat/completions'?'POST':'GET',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:path==='/v1/chat/completions'?JSON.stringify(b):undefined});
  return {gateway,req,db,providers,models,saved,rpcCalls,patches,calls};
 }
+test('merged model routing forwards large limits unchanged and does not add an unlimited default',async()=>{
+ const f=await fixture(()=>json('OK'),1,{max_output_tokens:null});
+ for(const parameters of [{max_tokens:65536},{max_completion_tokens:131072},{},{max_tokens:null,max_completion_tokens:null},{max_tokens:65536,max_completion_tokens:131072}]){
+  assert.equal((await f.gateway(f.req({model,messages:[{role:'user',content:'fixture'}],...parameters}))).status,200);
+ }
+ assert.equal(f.calls[0].payload.max_tokens,65536);assert.equal(f.calls[1].payload.max_completion_tokens,131072);assert.ok(!('max_tokens' in f.calls[1].payload));
+ for(const call of f.calls.slice(2,4)){assert.ok(!('max_tokens' in call.payload));assert.ok(!('max_completion_tokens' in call.payload));}
+ assert.equal(f.calls[4].payload.max_completion_tokens,131072);assert.ok(!('max_tokens' in f.calls[4].payload));
+});
+test('configured merged-model output cap remains enforced before any reservation or upstream request',async()=>{
+ const f=await fixture(()=>json('OK'),1,{max_output_tokens:65536});
+ for(const field of ['max_tokens','max_completion_tokens'])assert.equal((await f.gateway(f.req({model,messages:[{role:'user',content:'fixture'}],[field]:131072}))).status,400);
+ assert.equal(f.calls.length,0);assert.equal(f.rpcCalls.length,0);
+ assert.equal((await f.gateway(f.req())).status,200);assert.equal(f.calls[0].payload.max_tokens,65536);
+});
+test('long SSE answers above the old cumulative 1 MB ceiling complete and persist all text',async()=>{
+ const piece='long answer '.repeat(90),expected=piece.repeat(1100),encoder=new TextEncoder();let at=0;
+ const f=await fixture(()=>new Response(new ReadableStream({pull(controller){
+  if(at++<1100)controller.enqueue(encoder.encode(event({choices:[{index:0,delta:{content:piece}}]})));
+  else {controller.enqueue(encoder.encode(event({choices:[{index:0,delta:{},finish_reason:'stop'}]})+'data: [DONE]\n\n'));controller.close();}
+ }}),{headers:{'content-type':'text/event-stream'}}),1,{max_output_tokens:null});
+ const response=await f.gateway(f.req({model,messages:[{role:'user',content:'fixture'}],stream:true,max_tokens:131072})),body=await response.text();
+ assert.equal(response.status,200);assert.ok(body.length>1048576);assert.ok(body.endsWith('data: [DONE]\n\n'));assert.equal(f.saved[0].status,'success');assert.equal(f.saved[0].message.content,expected);
+});
+test('non-streaming upstream fallback accepts a long JSON answer above 1 MB',async()=>{
+ const expected='long answer '.repeat(100000),f=await fixture(()=>json(expected),1,{max_output_tokens:null});
+ const response=await f.gateway(f.req());assert.equal(response.status,200);assert.equal((await response.json()).choices[0].message.content,expected);assert.equal(f.saved[0].status,'success');
+});
+test('unterminated oversized SSE frames are still rejected without buffering an entire unbounded answer',async()=>{
+ const f=await fixture(()=>new Response('data: '+ 'x'.repeat(1048577),{headers:{'content-type':'text/event-stream'}}),1,{max_output_tokens:null});
+ const response=await f.gateway(f.req());assert.equal(response.status,503);assert.equal(f.saved[0].reason,'response_too_large');
+});
 test('canonical IDs strip namespaces/free suffixes, keep dates and versions, hide unknown labels',()=>{
  assert.equal(canonicalName('google/gemini-2.5-flash:free','openrouter'),model);assert.equal(canonicalName('@cf/meta/llama-3.1-8b-instruct','cloudflare'),'llama-3.1-8b-instruct');
  assert.equal(canonicalName('My Site/gemini-2.5-flash','custom','My Site'),model);assert.equal(canonicalName('gemini-2.5-flash-My Site','custom','My Site'),model);

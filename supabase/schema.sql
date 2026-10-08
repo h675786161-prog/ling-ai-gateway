@@ -12,10 +12,10 @@ create table public.ling_gateway_keys (
 );
 create table public.ling_gateway_settings (
  id boolean primary key default true check(id), default_daily_limit integer not null default 20,
- owner_reserve integer not null default 100, max_output_tokens integer not null default 4096,
+ owner_reserve integer not null default 100, max_output_tokens bigint default null,
  public_enabled boolean not null default false, monitor_hash text,
  check(default_daily_limit between 0 and 100000), check(owner_reserve between 0 and 100000),
- check(max_output_tokens between 64 and 32768)
+ check(max_output_tokens is null or max_output_tokens between 1 and 9007199254740991)
 );
 insert into public.ling_gateway_settings(id) values(true);
 create table public.ling_gateway_usage (
