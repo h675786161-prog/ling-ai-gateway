@@ -29,6 +29,37 @@ test('private merged-directory test plan uses the same unique enabled wire route
  const plan=privateList.data[0].gateway.probe_routes;assert.equal(plan.length,3);assert.deepEqual(plan.map(r=>r.model_id),routes.map(r=>r.model_id));assert.equal(plan[0].model_id,model);assert.equal(new Set(plan.map(r=>r.provider_id)).size,3);
  assert.equal(publicList.data[0].gateway.probe_routes,undefined);assert.ok(!JSON.stringify(plan).includes('secret_cipher'));assert.ok(!JSON.stringify(plan).includes('upstream-hidden'));assert.ok(plan.every(r=>!r.base_url));
 });
+test('reviewed names and station options merge without mixing special transport variants or dated versions',()=>{
+ assert.equal(canonicalName('[NV]gemma-4-31b'),'gemma-4-31b-it');assert.equal(canonicalName('[G]Kimi-2.6'),'kimi-k2.6');assert.equal(canonicalName('[OR]north-mini-code'),'north-mini-code');
+ assert.equal(canonicalName('[NV]diffusiongemma-26b-a4b'),'diffusiongemma-26b-a4b-it');
+ assert.equal(canonicalName('假流式-gemini-2.5-pro-cache'),'假流式-gemini-2.5-pro');assert.equal(canonicalName('抗截断-gemini-3.1-pro-preview'),'抗截断-gemini-3.1-pro-preview');assert.equal(canonicalName('防截断-gemini-3.1-pro-preview'),'防截断-gemini-3.1-pro-preview');
+ assert.equal(canonicalID('假流式-gemini-2.5-pro'),'假流式-gemini-2.5-pro');assert.throws(()=>canonicalID('随意前缀-gemini-2.5-pro'));
+ assert.equal(canonicalName('gemini-2.5-pro-search'),'gemini-2.5-pro');assert.equal(canonicalName('muse-spark-1.3-contributor-free'),'muse-spark-1.3-contributor');
+ assert.equal(canonicalName('step-3.5-flash'),'step-3.5-flash');assert.equal(canonicalName('step-3.5-flash-2603'),null);assert.equal(canonicalName('agnes-3.0-flash'),null);
+ assert.equal(canonicalName('qwen3-embedding-8b'),null);assert.equal(canonicalName('x-ai/grok-imagine-image'),null);assert.equal(canonicalName('[OR]llama-nemotron-rerank-vl-1b-v2'),null);
+ assert.notEqual(canonicalName('deepseek-v4-flash-0731'),canonicalName('deepseek-v4-flash'));
+});
+test('private review distinguishes unknown, manual hiding and dedicated APIs; public catalog reveals none of it',async()=>{
+ const f=await fixture(()=>json('OK'),2);f.providers[1].enabled=false;
+ for(const [model_id,canonical_source]of [['agnes-3.0-flash','auto'],['hidden-alias','manual'],['BAAI/bge-m3','auto']])f.models.push({provider_id:f.providers[1].id,model_id,listed:true,canonical_source,canonical_id:null,config_hash:'private-hash',lease_token:'private-lease'});
+ const directory=createModelDirectory({db:f.db,digest}),review=(await directory.list(false)).mapping;
+ assert.deepEqual(review.counts,{total:5,mapped:2,unrecognized:1,hidden:1,non_chat:1});assert.equal(review.entries.find(x=>x.model_id==='hidden-alias').state,'hidden');assert.equal(review.entries.find(x=>x.model_id==='agnes-3.0-flash').enabled,false);
+ for(const hidden of ['secret_cipher','base_url','private-hash','private-lease','upstream-hidden'])assert.equal(JSON.stringify(review).includes(hidden),false);
+ const publicCatalog=await directory.list();assert.equal(publicCatalog.mapping,undefined);assert.equal(JSON.stringify(publicCatalog).includes('agnes'),false);assert.deepEqual(publicCatalog.data.map(x=>x.id),[model]);
+ assert.equal((await f.gateway(f.req(undefined,'/admin/model-directory'))).status,401);
+});
+test('special transport model requests select only matching variants and keep upstream IDs intact',async()=>{
+ const f=await fixture(()=>json('OK'),3);f.models[0].canonical_id='gemini-2.5-pro';f.models[1].canonical_id='假流式-gemini-2.5-pro';f.models[2].canonical_id='抗截断-gemini-2.5-pro';
+ const response=await(await f.gateway(f.req({model:'假流式-gemini-2.5-pro',messages:[{role:'user',content:'x'}]}))).json();assert.equal(response.model,'假流式-gemini-2.5-pro');assert.equal(f.calls.length,1);assert.equal(f.calls[0].payload.model,'station-wire-2');
+ const catalog=await(await f.gateway(f.req(undefined,'/v1/models'))).json();assert.deepEqual(new Set(catalog.data.map(x=>x.id)),new Set(['gemini-2.5-pro','假流式-gemini-2.5-pro','抗截断-gemini-2.5-pro']));
+});
+test('unknown models keep exact original IDs, deduplicate only identical names and route without guessed identities',async()=>{
+ const f=await fixture(()=>json('Original'),3),original='Mystery/Alpha [v1]';for(let i=0;i<2;i++){f.models[i].canonical_id=null;f.models[i].canonical_source='auto';f.models[i].model_id=original;}
+ const catalog=await(await f.gateway(f.req(undefined,'/v1/models'))).json();const entry=catalog.data.find(x=>x.id===original);assert.equal(entry.gateway.naming,'original');assert.equal(entry.gateway.site_count,2);assert.equal(catalog.data.filter(x=>x.id===original).length,1);assert.ok(!JSON.stringify(catalog).includes('Station'));
+ const result=await(await f.gateway(f.req({model:original,messages:[{role:'user',content:'x'}]}))).json();assert.equal(result.model,original);assert.equal(f.calls.length,2);assert.ok(f.calls.every(c=>c.payload.model===original));
+ f.models.push({provider_id:f.providers[2].id,model_id:'[NV]diffusiongemma-26b-a4b',canonical_id:null,canonical_source:'auto',listed:true});assert.ok((await(await f.gateway(f.req(undefined,'/v1/models'))).json()).data.some(m=>m.id==='[NV]diffusiongemma-26b-a4b'));
+ f.models[0].canonical_source='manual';const directory=createModelDirectory({db:f.db,digest});assert.equal((await directory.routes(original)).routes.length,1);
+});
 test('all matching stations start in parallel; first visible text wins; every response saved',async()=>{
  let arrived=0,release;const barrier=new Promise(r=>release=r);const f=await fixture(async(url,o)=>{if(++arrived===4)release();await barrier;const n=Number(new URL(url).hostname[1]);return n===4?new Response('private error body',{status:429}):stream('Reply '+n,n===2?1:n===1?15:30,false,o.signal);});
  const result=await (await f.gateway(f.req())).json();assert.equal(f.calls.length,4);assert.deepEqual(result.choices.map(c=>c.message.content),['Reply 2','Reply 1','Reply 3']);assert.deepEqual(result.choices.map(c=>c.index),[0,1,2]);assert.equal(result.model,model);assert.equal(f.saved.length,4);assert.equal(f.saved.find(r=>r.http_status===429).reason,'http_429');assert.equal(f.rpcCalls.filter(c=>c.name==='reserve_routed').length,1);assert.equal(f.rpcCalls.filter(c=>c.name==='claim').length,4);assert.equal(result.usage.prompt_tokens,6);assert.equal(result.usage.completion_tokens,9);assert.ok(f.calls.every(c=>c.payload.n===undefined&&c.payload.model.startsWith('station-wire-')));assert.equal(JSON.stringify(result).includes('private error body'),false);assert.equal(result.gateway.saved,true);

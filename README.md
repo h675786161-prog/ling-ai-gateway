@@ -17,8 +17,11 @@
 例如三个站点分别叫 `gemini-2.5-flash`、`google/gemini-2.5-flash`、`站点名称/gemini-2.5-flash`，归并后酒馆的 `/v1/models` 只出现一个 `gemini-2.5-flash`。后台仍保留各站原始名称，调用时替换回该站接受的 ID。站点别名不会写进回复正文。
 
 - 读取各站目录后，常见模型家族、供应商命名空间、OpenRouter 的 `:free` 和已知站点名称前后缀会自动归并。日期、版本和参数规模保持分开。
-- 特殊叫法可以点击该模型的“归并”，填官方名称；多个站点填写相同名称就会汇入同一项。留空则从酒馆目录隐藏。手动设置在后续刷新目录时保留。无法可靠识别的名称先留在后台，等待手动归并。
+- 特殊叫法可以点击该模型的“归并”，填官方名称；多个站点填写相同名称就会汇入同一项。留空则从酒馆目录隐藏。手动设置在后续刷新目录时保留。无法可靠识别的名称按原名保留为独立选项，后台标注“原名保留”；相同原名可在不同站点间切换，不会猜成其他官方型号。
 - 后台显示每站的原始名称、酒馆名称、实测结果、延迟、HTTP 状态；“酒馆拉取的模型目录”汇总注册站点数、启用线路数和实测可用线路数。
+- “查看名称归并 → 模型名称归并”集中展示所有站点的已归并、原名保留、需专用接口、手动隐藏记录。可按站点或原始名称筛选，直接补填官方名称、修改或隐藏；保存失败会在编辑框显示原因。名称归并与模型实测是独立状态。
+- 已核对的 `[NV]`、`[OR]`、`[G]`、`[官纯]` 标签，以及 Gemini 的缓存、搜索、思考选项会从目录名称去除，上游请求保留完整原始名称。`假流式-`、`抗截断-`、`防截断-` **保留为独立模型前缀**，不会加入普通 Gemini 的路由组。
+- 新增的特殊家族采用逐个核对的名称表；未确认的自定义别名以完整原名加入独立选项，可选择以后再手动归并。嵌入、重排和已识别的专用语音、图片、视频生成型号单独列为需专用接口，暂不加入聊天目录。多模态输入的聊天模型仍可归并。所有手动归并和隐藏继续优先于自动规则。
 - 酒馆目录只包含已启用且已填密钥的线路。未测试或上次失败的模型也可列出，后续调用可以再次尝试恢复；“已列出”不代表“已经实测可用”。
 - 请求官方名称时，每个匹配站点最多调用一次。最快出现正文的回复作为第 1 条，其他回复依次作为第 2、3 条等；所有成功和部分输出都保存。失败、冷却或额度不足的站点记录原因，不产生空白候选。
 - 本站聊天页可以点击“回复 1 / 2 / 3”查看，并以当前选择的回复继续下一轮。调用记录中可重新查看本人所有候选回复。
@@ -28,7 +31,7 @@
 - 管理页：https://h675786161-prog.github.io/ling-ai-gateway/
 - API URL / Base URL：`https://ibpffxzdjvgydnhmvmvc.supabase.co/functions/v1/ling-ai-gateway/v1`
 - API Key：在“密钥与配额”生成的应用密钥。
-- 模型：从拉取的目录选择官方名称，例如 `gemini-2.5-flash`；具体可用项取决于你已经登记和启用的站点。
+- 模型：从拉取的目录选择名称，例如 `gemini-2.5-flash`、独立的 `假流式-gemini-2.5-pro`，或原名保留的 `jev`；具体可用项取决于你已经登记和启用的站点。
 - 管理访问码：这个网关的独立访问码，另行私下交付；不记录在仓库或说明中。
 
 选择“聊天补全 → 自定义（OpenAI-compatible）”，填写上述地址与应用密钥，连接后拉取模型。使用流式输出时，在聊天补全设置中将 **Multiple swipes per generation（每次生成多条回复）设为 2 或更高**。这用于开启酒馆对候选回复的接收；实际条数取决于后台聊天方式及已启动线路的结果，填写 2 也可以接收 3 条或更多。智能模式的快线路通常只有 1 条，加发备用后可能有 2 条。已经用 SillyTavern 1.18.0 隔离实例实测第 2、3 条的显示与左右切换。
@@ -89,7 +92,7 @@ npm test
 npm run dev
 ```
 
-数据库结构依次为 `supabase/schema.sql`、`supabase/model-checks.sql`、`supabase/model-fanout.sql`、`supabase/routing-modes.sql`、`supabase/access-code.sql`，通过 Supabase migration API 应用并记录迁移历史；不要对已部署数据库重复执行脚本。新增迁移保存聊天方式、首段正文耗时和独立门禁校验值。`tests/schema-fanout.sql` 与 `tests/schema-routing.sql` 是可回滚的数据库不变量检查。
+数据库结构依次为 `supabase/schema.sql`、`supabase/model-checks.sql`、`supabase/model-fanout.sql`、`supabase/routing-modes.sql`、`supabase/access-code.sql`，然后应用 `supabase/migrations/20261008094443_mapping_review_variant_ids.sql`；通过 Supabase migration API 应用并记录迁移历史，不要对已部署数据库重复执行脚本。最后一项允许保留假流式、抗截断、防截断的中文前缀；不改变数据库访问权限。`tests/schema-fanout.sql` 与 `tests/schema-routing.sql` 是可回滚的数据库不变量检查。
 
 `src/edge.ts`、`src/gateway.mjs`、`src/model-checks.mjs`、`src/model-directory.mjs`、`src/fanout.mjs` 和 `src/routing.mjs` 一起部署为 `ling-ai-gateway` Edge Function。必须关闭平台 JWT 验证，因为本项目采用自身 API key 验证，所有管理和模型接口均独立鉴权。`GET /v1/replies/{request_id}` 仅返回本人的保存结果；流式响应的 `x-gateway-request-id` 和结束摘要均包含该 ID。
 

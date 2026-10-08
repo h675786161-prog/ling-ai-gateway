@@ -1,4 +1,5 @@
 import {canonicalName,canonicalID,modelRows} from './model-directory.mjs';
+import {directoryModelID} from './model-names.mjs';
 // Real per-model checks: never use the gateway's failover router during a probe.
 export const MODEL_STATES={available:'可用',timeout:'超时',rate_limited:'限流',unauthorized:'没有权限',not_found:'模型不存在',unsupported:'请求不支持',empty:'没有文字',network_error:'连接失败',error:'上游报错',no_credit:'余额不足',unchecked:'未检查'};
 export function modelEndpoint(provider) {
@@ -72,7 +73,7 @@ export function createModelChecks({db,fetcher,validBase,resolveDNS,verifyDNS,uns
  const hash=p=>digest(p.kind+'\n'+p.base_url+'\n'+JSON.stringify(p.secret_cipher));
  async function provider(id){if(!idOK(id))throw new Error('invalid_id');const p=(await db.table('providers','?id=eq.'+id))[0];if(!p)throw new Error('provider_not_found');return p;}
  async function prepare(p){if(!p.secret_cipher)throw new Error('provider_key_required');validBase(p.base_url,p.kind);await verifyDNS(new URL(p.base_url).hostname,resolveDNS);return unseal(p.secret_cipher,secret);}
- async function list(p){const rows=await db.table('models','?provider_id=eq.'+p.id+'&listed=eq.true&order=model_id.asc&limit=1000'),current=await hash(p);return rows.map(({config_hash,lease_token,lease_until,...r})=>({...r,stale:!!config_hash&&config_hash!==current,checking:!!lease_until&&Date.parse(lease_until)>Date.now()}));}
+ async function list(p){const rows=await db.table('models','?provider_id=eq.'+p.id+'&listed=eq.true&order=model_id.asc&limit=1000'),current=await hash(p);return rows.map(({config_hash,lease_token,lease_until,...r})=>({...r,directory_id:directoryModelID(r),stale:!!config_hash&&config_hash!==current,checking:!!lease_until&&Date.parse(lease_until)>Date.now()}));}
  return {
   async list(id){return {models:await list(await provider(id))};},
   async discover(id){const p=await provider(id),key=await prepare(p),models=(await discoverModels(p,key,fetcher)).map(m=>({...m,canonical_id:canonicalName(m.id,p.kind,p.name)}));await db.rpc('model_catalog',{p_provider:id,p_models:models});return {models:await list(p),catalog_count:models.length};},
