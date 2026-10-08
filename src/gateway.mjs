@@ -1,6 +1,7 @@
 import {createModelChecks} from './model-checks.mjs';
 import {createModelDirectory,configurationHash} from './model-directory.mjs';
 import {createFanout} from './fanout.mjs';
+import {ROUTING_MODES,routingPolicy} from './routing.mjs';
 export const ALIASES = ['fast','smart','rp','backup'];
 const encoder = new TextEncoder();
 const DAY = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -72,6 +73,10 @@ function safeProvider(p,usage) {
     remaining:p.daily_limit===null?null:Math.max(0,p.daily_limit-(usage?.requests||0)),
     error_rate:p.total_attempts?Number(p.total_errors)/Number(p.total_attempts):0};
 }
+function visibleSettings(settings) {
+  const {monitor_hash,access_code_hash,...safe}=settings;
+  return safe;
+}
 export function createGateway(env,options={}) {
   const db=options.db||new DB(env,options.fetcher);
   const fetcher=options.fetcher||fetch;
@@ -120,8 +125,7 @@ export function createGateway(env,options={}) {
         db.table('providers','?order=priority.asc'),db.table('provider_usage','?day=eq.'+DAY()),db.table('users','?order=created_at.asc'),
         db.table('keys','?admin_access=eq.false&select=id,user_id,prefix,name,enabled,created_at,expires_at'),
         db.table('logs','?order=started_at.desc&limit=100'),db.table('settings'),db.table('usage','?day=eq.'+DAY())]);
-      const {monitor_hash,...visibleSettings}=settings[0];
-      return reply({providers:providers.map(p=>safeProvider(p,usage.find(u=>u.provider_id===p.id))),users,keys,logs,settings:visibleSettings,usage:userUsage,day:DAY(),owner_id:user.id});
+      return reply({providers:providers.map(p=>safeProvider(p,usage.find(u=>u.provider_id===p.id))),users,keys,logs,settings:visibleSettings(settings[0]),usage:userUsage,day:DAY(),owner_id:user.id});
     }
     if(path==='/admin/provider'&&['POST','PATCH'].includes(req.method)) {
       const b=await readJSON(req,16384);let p;
@@ -151,8 +155,11 @@ export function createGateway(env,options={}) {
     if(path==='/admin/settings'&&req.method==='PATCH') {
       const b=await readJSON(req,2048),data={};
       for(const [f,min,max] of [['default_daily_limit',0,100000],['owner_reserve',0,100000],['max_output_tokens',64,32768]])if(b[f]!==undefined){if(!Number.isInteger(b[f])||b[f]<min||b[f]>max)return error('invalid_'+f);data[f]=b[f];}
+      if(b.routing_mode!==undefined){if(!ROUTING_MODES.includes(b.routing_mode))return error('invalid_routing_mode');data.routing_mode=b.routing_mode;}
+      if(b.hedge_delay_ms!==undefined){if(!Number.isInteger(b.hedge_delay_ms)||b.hedge_delay_ms<1000||b.hedge_delay_ms>30000)return error('invalid_hedge_delay');data.hedge_delay_ms=b.hedge_delay_ms;}
+      if(b.multi_reply_limit!==undefined){if(!Number.isInteger(b.multi_reply_limit)||(b.multi_reply_limit!==0&&(b.multi_reply_limit<2||b.multi_reply_limit>20)))return error('invalid_multi_reply_limit');data.multi_reply_limit=b.multi_reply_limit;}
       if(b.public_enabled!==undefined){if(typeof b.public_enabled!=='boolean')return error('invalid_public_enabled');data.public_enabled=b.public_enabled;}
-      return reply({settings:(await db.write('settings','PATCH',data,'?id=eq.true'))[0]});
+      return reply({settings:visibleSettings((await db.write('settings','PATCH',data,'?id=eq.true'))[0])});
     }
     if(path==='/admin/users'&&req.method==='POST') {
       const b=await readJSON(req,2048);const n=b.daily_limit;
@@ -188,7 +195,7 @@ export function createGateway(env,options={}) {
     const settings=(await db.table('settings'))[0];
     const limit=b.max_completion_tokens??b.max_tokens??settings.max_output_tokens;
     if(!Number.isInteger(limit)||limit<1||limit>settings.max_output_tokens)return error('max_tokens_exceeded');
-    if(!ALIASES.includes(b.model)){const selected=await directory.routes(b.model);if(!selected.routes.length)return error('unknown_model');return fanout.chat(req,auth,{...b,model:selected.id},selected.routes,limit);}
+    if(!ALIASES.includes(b.model)){const selected=await directory.routes(b.model);if(!selected.routes.length)return error('unknown_model');return fanout.chat(req,auth,{...b,model:selected.id},selected.routes,limit,settings);}
     const providers=(await db.table('providers','?enabled=eq.true&order=priority.asc,created_at.asc')).filter(p=>p.aliases[b.model]&&p.secret_cipher);
     if(!providers.length)return error('no_provider_configured',503);
     const reservation=await db.rpc('reserve',{p_user:auth.user.id,p_model:b.model});
@@ -270,7 +277,7 @@ export function createGateway(env,options={}) {
     try {
       const url=new URL(req.url);let path=url.pathname.replace(/^(?:\/functions\/v1)?\/ling-ai-gateway(?=\/|$)/,'').replace(/\/$/,'')||'/';
       if(req.method==='OPTIONS')return cors(new Response(null,{status:204}));
-      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.3.0'}));
+      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.4.0'}));
       if(path==='/internal/health'&&req.method==='POST') {
         const token=(req.headers.get('authorization')||'').match(/^Bearer (\S+)$/)?.[1];
         const settings=(await db.table('settings'))[0];
@@ -283,8 +290,9 @@ export function createGateway(env,options={}) {
         const ip=req.headers.get('cf-connecting-ip')||req.headers.get('x-forwarded-for')?.split(',')[0]||'unknown';
         if(!await db.rpc('login_attempt',{p_ip:await digest(ip)}))return cors(error('login_rate_limited',429));
         if(typeof b.password!=='string'||b.password.length>256)return cors(error('unauthorized',401));
-        const rows=await db.request('private_site_state?site_id=eq.site-access-auth&select=state&limit=1');
-        if(!rows[0]?.state?.hash||!await equal(await digest(b.password),rows[0].state.hash))return cors(error('unauthorized',401));
+        const settings=(await db.table('settings'))[0];
+        const gateHash=settings.access_code_hash||(await db.request('private_site_state?site_id=eq.site-access-auth&select=state&limit=1'))[0]?.state?.hash;
+        if(!gateHash||!await equal(await digest(b.password),gateHash))return cors(error('unauthorized',401));
         const owner=(await db.table('users','?role=eq.admin&enabled=eq.true&limit=1'))[0];
         return cors(reply({session:await issue(owner,'管理会话',true,new Date(Date.now()+8*3600000).toISOString())}));
       }
@@ -292,7 +300,7 @@ export function createGateway(env,options={}) {
       if(path.startsWith('/v1/')) {
         const auth=await authenticate(req);if(!auth)return cors(error('unauthorized',401));
         if(auth.user.role!=='admin'&&!(await db.table('settings'))[0].public_enabled)return cors(error('public_closed',403));
-        if(path==='/v1/models'&&req.method==='GET')return cors(reply(await directory.list()));
+        if(path==='/v1/models'&&req.method==='GET')return cors(reply({...await directory.list(),routing:routingPolicy((await db.table('settings'))[0])}));
         if(path.startsWith('/v1/replies/')&&req.method==='GET')return cors(await fanout.getReplies(path.slice('/v1/replies/'.length),auth));
         if(path==='/v1/chat/completions'&&req.method==='POST')return cors(await chat(req,auth));
       }

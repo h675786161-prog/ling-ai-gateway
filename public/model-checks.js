@@ -1,9 +1,9 @@
 (() => {
- const checks={provider:'',models:[],running:false,controller:null,done:0,total:0,loading:0,generation:0};
+ const checks={provider:'',models:[],running:false,controller:null,done:0,total:0,loading:0,generation:0,directoryRunning:false};
  const statusLabels={unchecked:'未检查',available:'可用',timeout:'超时',rate_limited:'限流',unauthorized:'没有权限',not_found:'模型不存在',unsupported:'请求不支持',empty:'没有文字',network_error:'连接失败',error:'上游报错',no_credit:'余额不足'};
  const good=m=>m.status==='available'&&!m.stale;
  function providers(){return state.data?.providers||[];}
- function controls(){const hasKey=providers().find(p=>p.id===checks.provider)?.has_key,busy=checks.running||checks.loading>0;
+ function controls(){const hasKey=providers().find(p=>p.id===checks.provider)?.has_key,busy=checks.running||checks.directoryRunning||checks.loading>0;
   $('probe-provider').disabled=busy;$('probe-timeout').disabled=busy;$('discover-models').disabled=busy||!hasKey;$('run-models').disabled=busy||!hasKey||!checks.models.some(m=>m.listed);$('retry-models').disabled=busy||!hasKey||!checks.models.some(m=>m.listed&&!good(m));$('manual-models').disabled=busy||!checks.provider;$('copy-models').disabled=!checks.models.some(m=>m.listed&&good(m));$('stop-models').hidden=!checks.running;
   $('model-results').querySelectorAll('.model-actions button:first-child').forEach(b=>b.disabled=busy||!hasKey);$('model-results').querySelectorAll('.model-actions button:last-child').forEach(b=>b.disabled=busy);
  }
@@ -18,22 +18,22 @@
   $('model-results').replaceChildren();const configured=providers().find(p=>p.id===checks.provider)?.has_key;
   $('model-empty').hidden=visible.length>0;$('model-result-note').hidden=!visible.length;
   if(!visible.length){$('model-empty').querySelector('h3').textContent=configured?'读取列表，然后一键实测。':'先添加一个你想检查的站点。';$('model-empty').querySelector('p').textContent=configured?'也可以手动粘贴模型名称。每个结果都会保存，之后不用从头再测。':'填写站点的 API 地址和密钥即可。无需启用聊天路由；密钥只保存在服务端。';}
-  for(const m of shown){const row=node('article',undefined,'model-result'),identity=node('div',undefined,'model-identity');identity.append(node('code',m.model_id));identity.append(node('small','酒馆名称：'+(m.canonical_id||'待设置（暂不加入酒馆目录）')));if(m.name!==m.model_id)identity.append(node('small',m.name));if(m.returned_model&&m.returned_model!==m.model_id)identity.append(node('small','上游返回：'+m.returned_model));
+  for(const m of shown){const row=node('article',undefined,'model-result'),identity=node('div',undefined,'model-identity');identity.append(node('code',m.model_id));identity.append(node('small','酒馆名称：'+(m.canonical_id||'待设置（暂不加入酒馆目录）')));if(m.first_token_ms!==null&&m.first_token_ms!==undefined&&!m.stale)identity.append(node('small','首段正文 '+(m.first_token_ms/1000).toFixed(2)+' 秒'));if(m.name!==m.model_id)identity.append(node('small',m.name));if(m.returned_model&&m.returned_model!==m.model_id)identity.append(node('small','上游返回：'+m.returned_model));
    const label=m.checking?'检查中…':m.stale?'需重测':statusLabels[m.status]||m.status;const outcome=node('div',undefined,'model-outcome');outcome.append(node('span',label,'model-badge '+(m.checking?'testing':m.stale?'stale':m.status)));outcome.append(node('small',m.latency_ms===null||m.latency_ms===undefined?'—':(m.latency_ms/1000).toFixed(2)+' 秒'));
    const detail=node('div',undefined,'model-detail');detail.append(node('small',m.checked_at?new Date(m.checked_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'尚未发送生成请求'));if(m.http_status)detail.append(node('small','HTTP '+m.http_status));
-   const actions=node('div',undefined,'model-actions'),retry=action('重试',()=>batch([m]));retry.disabled=checks.running||checks.loading>0;actions.append(retry);
+   const actions=node('div',undefined,'model-actions'),retry=action('重试',()=>batch([m]));retry.disabled=checks.running||checks.directoryRunning||checks.loading>0;actions.append(retry);
    const copy=action('复制',()=>navigator.clipboard.writeText(m.canonical_id));copy.disabled=!m.canonical_id;actions.append(copy);
-   const mapping=action('归并',async()=>{const value=prompt('酒馆里显示的模型官方名称。不同站点填相同名称即可合并；留空则隐藏。上游请求仍使用原名称。',m.canonical_id||'');if(value===null)return;const r=await api('/admin/models/map','POST',{provider_id:checks.provider,model_id:m.model_id,canonical_id:value.trim()||null});checks.models=r.models;renderModels();await loadDirectory();window.dispatchEvent(new Event('ling-models-updated'));});mapping.disabled=checks.running;actions.append(mapping);
+   const mapping=action('归并',async()=>{const value=prompt('酒馆里显示的模型官方名称。不同站点填相同名称即可合并；留空则隐藏。上游请求仍使用原名称。',m.canonical_id||'');if(value===null)return;const r=await api('/admin/models/map','POST',{provider_id:checks.provider,model_id:m.model_id,canonical_id:value.trim()||null});checks.models=r.models;renderModels();await loadDirectory();window.dispatchEvent(new Event('ling-models-updated'));});mapping.disabled=checks.running||checks.directoryRunning;actions.append(mapping);
    row.append(identity,outcome,detail,actions);$('model-results').append(row);
   }
   if(visible.length&&!shown.length)$('model-results').append(node('p','没有符合筛选条件的模型。','empty'));controls();
  }
  async function loadModels(){const id=checks.provider,generation=++checks.generation;if(!id){checks.models=[];renderModels();return;}checks.loading++;controls();try{const r=await api('/admin/models?provider_id='+encodeURIComponent(id));if(generation===checks.generation){checks.models=r.models;renderModels();}await loadDirectory();}catch(e){notice(e.message);}finally{checks.loading--;controls();}}
- async function loadDirectory(){const session=state.session;if(!state.admin||!session)return;const r=await api('/admin/model-directory');if(state.session!==session)return;$('merged-model-list').replaceChildren();for(const m of r.data){const e=node('article',undefined,'merged-model');e.append(node('code',m.id),node('small',m.gateway.site_count+' 个站点 · '+m.gateway.enabled_sites+' 条启用线路 · '+m.gateway.available_sites+' 条实测可用'),action('复制',()=>navigator.clipboard.writeText(m.id)));$('merged-model-list').append(e);}if(!r.data.length)$('merged-model-list').append(node('p','读取站点目录后，这里会合并显示模型名称。无法识别的名称可点击“归并”手动设置。','muted fine'));}
+ async function loadDirectory(){const session=state.session;if(!state.admin||!session)return;const r=await api('/admin/model-directory');if(state.session!==session)return;window.dispatchEvent(new CustomEvent('ling-directory-loaded',{detail:r.data}));}
  async function loading(fn){checks.loading++;controls();try{await fn();}catch(e){notice(e.message);}finally{checks.loading--;controls();}}
  const setProgress=text=>{$('probe-progress').hidden=false;$('probe-progress-text').textContent=text;$('probe-progress-count').textContent=checks.done+' / '+checks.total;$('probe-progress-bar').max=checks.total||1;$('probe-progress-bar').value=checks.done;};
  async function waitFor(ms,signal){return new Promise(resolve=>{if(signal.aborted){resolve();return;}const onAbort=()=>{clearTimeout(timer);resolve();};const timer=setTimeout(()=>{signal.removeEventListener('abort',onAbort);resolve();},ms);signal.addEventListener('abort',onAbort,{once:true});});}
- async function batch(models){if(checks.running||!models.length)return;checks.running=true;checks.done=0;checks.total=models.length;checks.controller=new AbortController();const controller=checks.controller,id=checks.provider,timeout=Number($('probe-timeout').value);let at=0,halted=false,pauseUntil=0;
+ async function batch(models){if(checks.running||checks.directoryRunning||!models.length)return;checks.running=true;window.dispatchEvent(new CustomEvent('ling-site-probe-running',{detail:true}));checks.done=0;checks.total=models.length;checks.controller=new AbortController();const controller=checks.controller,id=checks.provider,timeout=Number($('probe-timeout').value);let at=0,halted=false,pauseUntil=0;
   controls();notice('');setProgress('正在检查，结果会逐个显示。');
   async function worker(){while(at<models.length&&!controller.signal.aborted&&!halted){if(pauseUntil>Date.now()){await waitFor(Math.min(1000,pauseUntil-Date.now()),controller.signal);continue;}const m=models[at++];let retry=true;
    while(retry&&!controller.signal.aborted&&!halted){retry=false;m.checking=true;renderModels();
@@ -45,7 +45,7 @@
     }catch(e){if(e.name!=='AbortError'){halted=true;notice(e.message);}}finally{m.checking=false;renderModels();}
    }
   }}
-  try{await Promise.all([worker(),worker()]);}finally{checks.running=false;checks.controller=null;models.forEach(m=>m.checking=false);renderModels();setProgress(controller.signal.aborted?'已停止，已有结果保留。':halted?'检查已暂停，已有结果保留。':'检查完成。');await loadModels();}
+  try{await Promise.all([worker(),worker()]);}finally{checks.running=false;window.dispatchEvent(new CustomEvent('ling-site-probe-running',{detail:false}));checks.controller=null;models.forEach(m=>m.checking=false);renderModels();setProgress(controller.signal.aborted?'已停止，已有结果保留。':halted?'检查已暂停，已有结果保留。':'检查完成。');await loadModels();}
  }
  $('probe-provider').onchange=()=>{checks.provider=$('probe-provider').value;checks.models=[];renderModels();loadModels();};
  $('discover-models').onclick=()=>loading(async()=>{const r=await api('/admin/models/discover','POST',{provider_id:checks.provider});checks.models=r.models;renderModels();await loadDirectory();window.dispatchEvent(new Event('ling-models-updated'));notice('已读到 '+r.catalog_count+' 个候选模型。官方名称已归并；可以一键实测，或为未识别的名称手动“归并”。');});
@@ -55,6 +55,6 @@
  $('model-add-provider').onclick=()=>editProvider();
  $('manual-models').onclick=()=>{$('manual-model-error').textContent='';$('manual-model-input').value='';$('manual-model-dialog').showModal();};
  $('manual-model-form').onsubmit=async e=>{e.preventDefault();e.submitter.disabled=true;try{const models=$('manual-model-input').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);const r=await api('/admin/models/add','POST',{provider_id:checks.provider,models});checks.models=r.models;$('manual-model-dialog').close();renderModels();await loadDirectory();window.dispatchEvent(new Event('ling-models-updated'));}catch(e){$('manual-model-error').textContent=e.message;}finally{e.submitter.disabled=false;}};
- window.addEventListener('ling-refreshed',fillProviders);window.addEventListener('ling-locked',()=>{checks.controller?.abort();checks.generation++;checks.models=[];checks.provider='';$('model-results').replaceChildren();$('merged-model-list').replaceChildren();});
+ window.addEventListener('ling-directory-running',e=>{checks.directoryRunning=e.detail;controls();});window.addEventListener('ling-directory-finished',()=>loadModels());window.addEventListener('ling-refreshed',fillProviders);window.addEventListener('ling-locked',()=>{checks.controller?.abort();checks.generation++;checks.models=[];checks.provider='';$('model-results').replaceChildren();$('merged-model-list').replaceChildren();});
  if(state.data)fillProviders();else renderModels();
 })();
