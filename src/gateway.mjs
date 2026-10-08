@@ -2,6 +2,7 @@ import {createModelChecks} from './model-checks.mjs';
 import {createModelDirectory,configurationHash} from './model-directory.mjs';
 import {createFanout} from './fanout.mjs';
 import {ROUTING_MODES,routingPolicy} from './routing.mjs';
+import {readUpstreamError,failureDiagnostic,allFailedMessage} from './diagnostics.mjs';
 export const ALIASES = ['fast','smart','rp','backup'];
 const encoder = new TextEncoder();
 const DAY = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -158,6 +159,7 @@ export function createGateway(env,options={}) {
       if(b.max_output_tokens!==undefined){if(b.max_output_tokens!==null&&(!Number.isSafeInteger(b.max_output_tokens)||b.max_output_tokens<1))return error('invalid_max_output_tokens');data.max_output_tokens=b.max_output_tokens;}
       if(b.routing_mode!==undefined){if(!ROUTING_MODES.includes(b.routing_mode))return error('invalid_routing_mode');data.routing_mode=b.routing_mode;}
       if(b.hedge_delay_ms!==undefined){if(!Number.isInteger(b.hedge_delay_ms)||b.hedge_delay_ms<1000||b.hedge_delay_ms>30000)return error('invalid_hedge_delay');data.hedge_delay_ms=b.hedge_delay_ms;}
+      if(b.first_output_timeout_ms!==undefined){if(!Number.isInteger(b.first_output_timeout_ms)||b.first_output_timeout_ms<5000||b.first_output_timeout_ms>120000)return error('invalid_first_output_timeout');data.first_output_timeout_ms=b.first_output_timeout_ms;}
       if(b.multi_reply_limit!==undefined){if(!Number.isInteger(b.multi_reply_limit)||(b.multi_reply_limit!==0&&(b.multi_reply_limit<2||b.multi_reply_limit>20)))return error('invalid_multi_reply_limit');data.multi_reply_limit=b.multi_reply_limit;}
       if(b.public_enabled!==undefined){if(typeof b.public_enabled!=='boolean')return error('invalid_public_enabled');data.public_enabled=b.public_enabled;}
       return reply({settings:visibleSettings((await db.write('settings','PATCH',data,'?id=eq.true'))[0])});
@@ -187,7 +189,7 @@ export function createGateway(env,options={}) {
     return error('not_found',404);
   }
   async function chat(req,auth) {
-    const deadline=Date.now()+110000;
+    const deadline=Date.now()+130000;
     const b=await readJSON(req);
     if(typeof b.model!=='string'||!b.model||b.model.length>200)return error('unknown_model');
     if(!Array.isArray(b.messages)||!b.messages.length||b.messages.length>1000||b.messages.some(m=>!m||!['system','developer','user','assistant','tool','function'].includes(m.role)))return error('invalid_messages');
@@ -214,7 +216,8 @@ export function createGateway(env,options={}) {
       if(!await db.rpc('claim',{p_provider:p.id,p_admin:auth.user.role==='admin'}))continue;
       tried++;const start=Date.now(),controller=new AbortController();
       const disconnect=()=>controller.abort();req.signal.addEventListener('abort',disconnect,{once:true});
-      let timer=setTimeout(()=>controller.abort(),Math.max(1,Math.min(options.firstTimeout||18000,deadline-Date.now()))),up,streamStarted=false;
+      const waitMs=options.firstTimeout??settings.first_output_timeout_ms??90000;
+      let timer=setTimeout(()=>controller.abort(),Math.max(1,Math.min(waitMs,deadline-Date.now()))),up,streamStarted=false;
       const cleanup=()=>{clearTimeout(timer);req.signal.removeEventListener('abort',disconnect);};
       try {
         validBase(p.base_url,p.kind);await verifyDNS(new URL(p.base_url).hostname,options.resolveDNS);
@@ -224,12 +227,12 @@ export function createGateway(env,options={}) {
         delete payload.user; // Do not send local user identifiers upstream.
         up=await fetcher(p.base_url+'/chat/completions',{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify(payload),signal:controller.signal,redirect:'error'});
         if(!up.ok) {
-          const status=up.status;await up.body?.cancel();cleanup();
+          const status=up.status,details=await readUpstreamError(up,{secrets:[key],sensitive:b.messages.map(m=>m.content).filter(c=>typeof c==='string')});cleanup();
           const retry=up.headers.get('retry-after');const secs=/^\d+$/.test(retry||'')?Number(retry):Math.max(0,Math.ceil((Date.parse(retry||'')-Date.now())/1000))||0;
-          attempts.push({provider_id:p.id,status,latency_ms:Date.now()-start});
+          const failed={provider_id:p.id,provider_name:p.name,http_status:status,status,reason:'http_'+status,latency_ms:Date.now()-start,...details};failed.diagnostic=failureDiagnostic(failed);attempts.push(failed);
           await persist('provider_result',{p_provider:p.id,p_status:status,p_latency:Date.now()-start,p_success:false,p_health:false,p_retry:secs});
           if([401,403,404,429].includes(status)||status>=500)continue;
-          await finish('failed');return error('upstream_rejected_request',status>=400&&status<500?status:502);
+          await finish('failed');return reply({error:{code:'upstream_rejected_request',type:'gateway_error',message:allFailedMessage(b.model,[failed])}},status>=400&&status<500?status:502);
         }
         if(b.stream) {
           if(!up.headers.get('content-type')?.includes('text/event-stream')||!up.body)throw new Error('invalid_upstream_stream');
@@ -270,20 +273,20 @@ export function createGateway(env,options={}) {
         await persist('provider_result',{p_provider:p.id,p_status:200,p_latency:Date.now()-start,p_success:true,p_health:false,p_retry:0});
         await finish('success',obj.usage);return reply(obj);
       }catch(e) {
-        cleanup();controller.abort();if(streamStarted)throw e;
+        const wasTimedOut=controller.signal.aborted;cleanup();controller.abort();if(streamStarted)throw e;
         if(e.message==='database_unavailable')throw e;
-        attempts.push({provider_id:p.id,status:0,latency_ms:Date.now()-start});
+        const failed={provider_id:p.id,provider_name:p.name,status:0,http_status:0,latency_ms:Date.now()-start,reason:wasTimedOut?'timeout':'upstream_error',wait_seconds:Math.ceil((Date.now()-start)/1000)};failed.diagnostic=failureDiagnostic(failed);attempts.push(failed);
         await persist('provider_result',{p_provider:p.id,p_status:0,p_latency:Date.now()-start,p_success:false,p_health:false,p_retry:0});
         if(req.signal.aborted){await finish('failed');return error('client_cancelled',499);}
       }
     }
-    await finish('failed');return error('all_providers_unavailable',503);
+    await finish('failed');return reply({error:{code:'all_providers_unavailable',type:'gateway_error',message:allFailedMessage(b.model,attempts)}},503);
   }
   return async req => {
     try {
       const url=new URL(req.url);let path=url.pathname.replace(/^(?:\/functions\/v1)?\/ling-ai-gateway(?=\/|$)/,'').replace(/\/$/,'')||'/';
       if(req.method==='OPTIONS')return cors(new Response(null,{status:204}));
-      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.5.1'}));
+      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.5.2'}));
       if(path==='/internal/health'&&req.method==='POST') {
         const token=(req.headers.get('authorization')||'').match(/^Bearer (\S+)$/)?.[1];
         const settings=(await db.table('settings'))[0];

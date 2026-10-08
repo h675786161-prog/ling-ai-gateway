@@ -1,11 +1,11 @@
 {
   "name": "ling-ai-gateway",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check src/gateway.mjs && node --check src/model-checks.mjs && node --check src/model-directory.mjs && node --check src/model-names.mjs && node --check src/fanout.mjs && node --check src/routing.mjs && node --check public/app.js && node --check public/directory-checks.js && node --check public/model-checks.js && node --check public/mapping-review.js && node --check public/chat-replies.js && node --check src/worker.mjs",
+    "check": "node --check src/gateway.mjs && node --check src/diagnostics.mjs && node --check src/model-checks.mjs && node --check src/model-directory.mjs && node --check src/model-names.mjs && node --check src/fanout.mjs && node --check src/routing.mjs && node --check public/app.js && node --check public/directory-checks.js && node --check public/model-checks.js && node --check public/mapping-review.js && node --check public/chat-replies.js && node --check src/worker.mjs",
     "dev": "node scripts/dev.mjs"
   },
   "engines": {

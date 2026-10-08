@@ -1,5 +1,6 @@
 import {canonicalName,canonicalID,modelRows} from './model-directory.mjs';
 import {directoryModelID} from './model-names.mjs';
+import {readUpstreamError,errorObject,failureDiagnostic} from './diagnostics.mjs';
 // Real per-model checks: never use the gateway's failover router during a probe.
 export const MODEL_STATES={available:'可用',timeout:'超时',rate_limited:'限流',unauthorized:'没有权限',not_found:'模型不存在',unsupported:'请求不支持',empty:'没有文字',network_error:'连接失败',error:'上游报错',no_credit:'余额不足',unchecked:'未检查'};
 export function modelEndpoint(provider) {
@@ -47,24 +48,24 @@ export async function probeModel(provider,key,model,{fetcher=fetch,timeoutMs=120
   const response=await fetcher(provider.base_url+'/chat/completions',{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},redirect:'error',signal:controller.signal,
    body:JSON.stringify({model,messages:[{role:'user',content:'Reply with only OK.'}],stream:true})});
   result.http_status=response.status;
-  if(!response.ok){result.status=probeStatus(response.status);await response.body?.cancel();return result;}
+  if(!response.ok){result.status=probeStatus(response.status);Object.assign(result,await readUpstreamError(response,{secrets:[key]}));return result;}
   if(!response.headers.get('content-type')?.includes('text/event-stream')){
    const data=await boundedJSON(response);
    result.returned_model=typeof data.model==='string'?data.model.slice(0,200):null;
-   result.status=data.error?probeStatus(Number(data.error.status)||502):textValue(data.choices?.[0]?.message?.content)?'available':'empty';return result;
+   if(data.error)Object.assign(result,errorObject(data,{secrets:[key]}));result.status=data.error?probeStatus(Number(data.error.status)||502):textValue(data.choices?.[0]?.message?.content)?'available':'empty';return result;
   }
   reader=response.body.getReader();const decoder=new TextDecoder();let buffer='',bytes=0;
   while(true){const chunk=await reader.read();if(chunk.done){result.status='empty';break;}bytes+=chunk.value.length;if(bytes>524288)throw new Error('response_too_large');
    buffer+=decoder.decode(chunk.value,{stream:true});buffer=buffer.replace(/\r\n/g,'\n');let index;
    while((index=buffer.indexOf('\n\n'))>=0){const frame=buffer.slice(0,index);buffer=buffer.slice(index+2);const data=frame.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');if(!data)continue;
     if(data==='[DONE]'){result.status='empty';return result;}
-    const obj=JSON.parse(data);if(obj.error){result.status=probeStatus(Number(obj.error.status)||Number(obj.error.code)||502);return result;}
+    const obj=JSON.parse(data);if(obj.error){Object.assign(result,errorObject(obj,{secrets:[key]}));result.status=probeStatus(Number(obj.error.status)||Number(obj.error.code)||502);return result;}
     if(typeof obj.model==='string')result.returned_model=obj.model.slice(0,200);
     if(textValue(obj.choices?.[0]?.delta?.content)||textValue(obj.choices?.[0]?.message?.content)){result.status='available';return result;}
    }
   }
  }catch(e){result.status=signal?.aborted?'cancelled':expired?'timeout':e instanceof SyntaxError||e.message==='response_too_large'?'error':'network_error';}
- finally {result.latency_ms=Date.now()-started;controller.abort();clearTimeout(timer);signal?.removeEventListener('abort',abort);await reader?.cancel().catch(()=>{});}
+ finally {result.latency_ms=Date.now()-started;result.diagnostic=result.status==='available'?null:failureDiagnostic({...result,reason:result.status==='timeout'?'timeout':result.status==='empty'?'empty_response':result.status==='cancelled'?'cancelled':'upstream_error',wait_seconds:timeoutMs/1000});controller.abort();clearTimeout(timer);signal?.removeEventListener('abort',abort);await reader?.cancel().catch(()=>{});}
  return result;
 }
 export function createModelChecks({db,fetcher,validBase,resolveDNS,verifyDNS,unseal,digest,secret}) {
@@ -87,7 +88,7 @@ export function createModelChecks({db,fetcher,validBase,resolveDNS,verifyDNS,uns
    const key=await prepare(p),version=await hash(p),claim=await db.rpc('probe_claim',{p_provider:id,p_model:model});
    if(claim.error)return {blocked:claim.error,retry_after:claim.retry_after||0};
    const result=await probeModel(p,key,model,{fetcher,timeoutMs:timeout*1000,signal});
-   let persisted;for(let i=0;i<2;i++){try{persisted=await db.rpc('probe_finish',{p_lease:claim.lease,p_status:result.status,p_http:result.http_status,p_latency:result.latency_ms,p_hash:version,p_returned:result.returned_model});break;}catch(e){if(i===1)throw e;}}
+   let persisted;for(let i=0;i<2;i++){try{persisted=await db.rpc('probe_finish',{p_lease:claim.lease,p_status:result.status,p_http:result.http_status,p_latency:result.latency_ms,p_hash:version,p_returned:result.returned_model,p_diagnostic:result.diagnostic});break;}catch(e){if(i===1)throw e;}}
    return {result:{...result,checked_at:new Date().toISOString()},persisted};
   }
  };

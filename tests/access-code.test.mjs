@@ -39,3 +39,8 @@ test('admin can remove the output cap and optionally save caps above the previou
  for(const value of [0,-1,1.5,'65536',9007199254740992])assert.equal((await f.admin('/admin/settings','PATCH',{max_output_tokens:value})).status,400);
  assert.equal((await (await f.admin('/admin/overview')).json()).settings.max_output_tokens,null);
 });
+test('first-output waiting is configurable for slow models without changing smart backup delay or output limits',async()=>{
+ const f=await fixture();const saved=await f.admin('/admin/settings','PATCH',{first_output_timeout_ms:120000});assert.equal(saved.status,200);assert.equal((await saved.json()).settings.first_output_timeout_ms,120000);
+ for(const value of [4999,120001,60000.5,'90000'])assert.equal((await f.admin('/admin/settings','PATCH',{first_output_timeout_ms:value})).status,400);
+ assert.equal((await(await f.admin('/admin/overview')).json()).settings.first_output_timeout_ms,120000);
+});

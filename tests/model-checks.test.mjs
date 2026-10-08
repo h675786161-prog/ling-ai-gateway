@@ -42,8 +42,8 @@ test('HTTP failures distinguish quota, permissions, model absence and format',as
   const r=await probeModel(provider,'secret','m',{fetcher:async()=>new Response('{}',{status:http})});assert.equal(r.status,status);assert.equal(r.http_status,http);
  }
 });
-test('HTTP 200 SSE error never counts as available',async()=>{
- const r=await probeModel(provider,'secret','m',{fetcher:async()=>sse(frame({error:{status:429,message:'private'}}))});assert.equal(r.status,'rate_limited');assert.equal(JSON.stringify(r).includes('private'),false);
+test('HTTP 200 SSE error never counts as available and retains redacted rate-limit detail',async()=>{
+ const r=await probeModel(provider,'secret','m',{fetcher:async()=>sse(frame({error:{status:429,message:'rate limit exceeded; api_key=secret'}}))});assert.equal(r.status,'rate_limited');assert.equal(JSON.stringify(r).includes('api_key=secret'),false);assert.ok(r.diagnostic.summary_zh.includes('请求太频繁'));assert.ok(r.diagnostic.upstream_message.includes('rate limit exceeded'));
 });
 test('JSON fallback needs actual message text, not successful headers',async()=>{
  assert.equal((await probeModel(provider,'secret','m',{fetcher:async()=>Response.json({choices:[{message:{content:''}}]})})).status,'empty');
