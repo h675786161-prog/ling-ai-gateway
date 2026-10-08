@@ -61,10 +61,10 @@ test('private merged-directory test plan uses the same unique enabled wire route
  const plan=privateList.data[0].gateway.probe_routes;assert.equal(plan.length,3);assert.deepEqual(plan.map(r=>r.model_id),routes.map(r=>r.model_id));assert.equal(plan[0].model_id,model);assert.equal(new Set(plan.map(r=>r.provider_id)).size,3);
  assert.equal(publicList.data[0].gateway.probe_routes,undefined);assert.ok(!JSON.stringify(plan).includes('secret_cipher'));assert.ok(!JSON.stringify(plan).includes('upstream-hidden'));assert.ok(plan.every(r=>!r.base_url));
 });
-test('reviewed names and station options merge without mixing special transport variants or dated versions',()=>{
+test('reviewed names follow Ling grouping policy without mixing dated model versions',()=>{
  assert.equal(canonicalName('[NV]gemma-4-31b'),'gemma-4-31b-it');assert.equal(canonicalName('[G]Kimi-2.6'),'kimi-k2.6');assert.equal(canonicalName('[OR]north-mini-code'),'north-mini-code');
  assert.equal(canonicalName('[NV]diffusiongemma-26b-a4b'),'diffusiongemma-26b-a4b-it');
- assert.equal(canonicalName('假流式-gemini-2.5-pro-cache'),'假流式-gemini-2.5-pro');assert.equal(canonicalName('抗截断-gemini-3.1-pro-preview'),'抗截断-gemini-3.1-pro-preview');assert.equal(canonicalName('防截断-gemini-3.1-pro-preview'),'防截断-gemini-3.1-pro-preview');
+ assert.equal(canonicalName('假流式-gemini-2.5-pro-cache'),'gemini-2.5-pro');assert.equal(canonicalName('抗截断-gemini-3.1-pro-preview'),'gemini-3.1-pro-preview');assert.equal(canonicalName('防截断-gemini-3.1-pro-preview'),'gemini-3.1-pro-preview');
  assert.equal(canonicalID('假流式-gemini-2.5-pro'),'假流式-gemini-2.5-pro');assert.throws(()=>canonicalID('随意前缀-gemini-2.5-pro'));
  assert.equal(canonicalName('gemini-2.5-pro-search'),'gemini-2.5-pro');assert.equal(canonicalName('muse-spark-1.3-contributor-free'),'muse-spark-1.3-contributor');
  assert.equal(canonicalName('step-3.5-flash'),'step-3.5-flash');assert.equal(canonicalName('step-3.5-flash-2603'),null);assert.equal(canonicalName('agnes-3.0-flash'),null);
@@ -80,10 +80,18 @@ test('private review distinguishes unknown, manual hiding and dedicated APIs; pu
  const publicCatalog=await directory.list();assert.equal(publicCatalog.mapping,undefined);assert.equal(JSON.stringify(publicCatalog).includes('agnes'),false);assert.deepEqual(publicCatalog.data.map(x=>x.id),[model]);
  assert.equal((await f.gateway(f.req(undefined,'/admin/model-directory'))).status,401);
 });
-test('special transport model requests select only matching variants and keep upstream IDs intact',async()=>{
+test('explicit manual transport mappings remain selectable and keep upstream IDs intact',async()=>{
  const f=await fixture(()=>json('OK'),3);f.models[0].canonical_id='gemini-2.5-pro';f.models[1].canonical_id='假流式-gemini-2.5-pro';f.models[2].canonical_id='抗截断-gemini-2.5-pro';
  const response=await(await f.gateway(f.req({model:'假流式-gemini-2.5-pro',messages:[{role:'user',content:'x'}]}))).json();assert.equal(response.model,'假流式-gemini-2.5-pro');assert.equal(f.calls.length,1);assert.equal(f.calls[0].payload.model,'station-wire-2');
  const catalog=await(await f.gateway(f.req(undefined,'/v1/models'))).json();assert.deepEqual(new Set(catalog.data.map(x=>x.id)),new Set(['gemini-2.5-pro','假流式-gemini-2.5-pro','抗截断-gemini-2.5-pro']));
+});
+test('CLI station prefixes and Gemini or Claude option suffixes group by model while keeping versions intact',()=>{
+ const examples=[['agycli-claude-opus-5-5-high','claude-opus-5-5'],['agycli-claude-opus-5-5-high-假流式','claude-opus-5-5'],['agycli-claude-sonnet-5-5-medium-抗截断','claude-sonnet-5-5'],['agycli-gemini-3.5-flash-extra-low-search','gemini-3.5-flash'],['agycli-gemini-3.6-flash-tiered-抗截断','gemini-3.6-flash'],['agycli-gemini-3.8-flash-medium-假流式','gemini-3.8-flash'],['gcli-gemini-3.1-flash-lite-preview-search','gemini-3.1-flash-lite-preview'],['gcli-gemini-2.5-pro-假流式','gemini-2.5-pro']];
+ for(const [raw,expected]of examples)assert.equal(canonicalName(raw),expected,raw);
+ assert.notEqual(canonicalName('agycli-gemini-3.6-flash-high'),canonicalName('gcli-gemini-3.8-flash'));
+ assert.equal(canonicalName('agycli-gemini-pro-agent'),null);assert.equal(canonicalName('agycli-gemini-pro-agent-search'),null);
+ assert.equal(canonicalName('agycli-gemini-3.1-flash-image-假流式'),null);
+ assert.equal(canonicalName('gcli-made-up-alias'),null);
 });
 test('unknown models keep exact original IDs, deduplicate only identical names and route without guessed identities',async()=>{
  const f=await fixture(()=>json('Original'),3),original='Mystery/Alpha [v1]';for(let i=0;i<2;i++){f.models[i].canonical_id=null;f.models[i].canonical_source='auto';f.models[i].model_id=original;}

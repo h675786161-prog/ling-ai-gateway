@@ -286,7 +286,7 @@ export function createGateway(env,options={}) {
     try {
       const url=new URL(req.url);let path=url.pathname.replace(/^(?:\/functions\/v1)?\/ling-ai-gateway(?=\/|$)/,'').replace(/\/$/,'')||'/';
       if(req.method==='OPTIONS')return cors(new Response(null,{status:204}));
-      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.5.2'}));
+      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.5.3'}));
       if(path==='/internal/health'&&req.method==='POST') {
         const token=(req.headers.get('authorization')||'').match(/^Bearer (\S+)$/)?.[1];
         const settings=(await db.table('settings'))[0];

@@ -11,6 +11,7 @@ export function canonicalName(value,kind='custom',station='') {
  if(id.startsWith('@cf/'))id=id.split('/').slice(2).join('/');
  else if(id.includes('/'))id=id.split('/').at(-1);
  id=removeModelDecorations(id);
+ if(/^gemini-(?:pro|flash)(?:-|$)/.test(modelCore(id)))return null; // Generic station aliases do not identify a version.
  return !modelExclusion(id)&&id.length<=200&&cleanID.test(id)&&(family.test(modelCore(id))||reviewedModel(id))?id:null;
 }
 export function canonicalID(value){if(typeof value!=='string')throw new Error('invalid_canonical_model');const id=value.trim().toLowerCase();if(id.length>200||!cleanID.test(id)||['fast','smart','rp','backup'].includes(id))throw new Error('invalid_canonical_model');return id;}

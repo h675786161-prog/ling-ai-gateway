@@ -19,13 +19,16 @@ const aliases = new Map([
 ]);
 export function removeModelDecorations(id) {
  id=id.replace(/^(?:\[(?:nv|or|g|官纯)\]\s*)+/,'');
+ id=id.replace(/^(?:agycli|gcli)-(?=(?:gemini|claude)-)/,'');
  const variant=id.match(/^(?:假流式|抗截断|防截断)-/)?.[0]||'';
  if(variant)id=id.slice(variant.length);
  id=id.replace(/:(?:free|batch)$/,'');
- // These Gemini options change a station's handling, not the model version.
- if(id.startsWith('gemini-'))id=id.replace(/(?:-(?:cache|maxthinking|nothinking|search))+$/,'');
+ // Ling's grouping policy: versioned Gemini and Claude options share one model
+ // name. Existing manual mappings are preserved by the catalog database RPC.
+ const grouped=/^(?:gemini-\d+(?:\.\d+)*-|claude-(?:opus|sonnet|haiku)-\d+(?:[.-]\d+)*(?:-|$))/.test(id);
+ if(grouped)id=id.replace(/(?:-(?:extra-low|low|medium|high|tiered|agent|cache|maxthinking|nothinking|search|假流式|抗截断|防截断))+$/,'');
  if(/^muse-spark-\d+\.\d+-contributor-free$/.test(id))id=id.slice(0,-5);
- return variant+(aliases.get(id)||id);
+ return (grouped?'':variant)+(aliases.get(id)||id);
 }
 export const modelCore=id=>id.replace(/^(?:假流式|抗截断|防截断)-/,'');
 export const reviewedModel=id=>reviewed.has(id);
@@ -33,7 +36,7 @@ export function modelExclusion(value) {
  const id=removeModelDecorations(String(value||'').toLowerCase().split('/').at(-1));
  if(/(?:embed(?:ding)?|rerank(?:er)?|(?:^|\/)bge-)/.test(id))return '嵌入或重排模型，需要专用接口，暂不加入聊天目录。';
  if(/(?:^|-)asr(?:-|$)|(?:^|-)tts(?:-|$)|(?:^|-)realtime(?:-|$)/.test(id))return '语音专用模型，需要专用接口，暂不加入聊天目录。';
- if(/^grok-imagine-|^step-image-/.test(removeModelDecorations(id)))return '图片或视频生成模型，需要专用接口，暂不加入聊天目录。';
+ if(/^grok-imagine-|^step-image-|^gemini-\d.*-image(?:-|$)/.test(modelCore(id)))return '图片或视频生成模型，需要专用接口，暂不加入聊天目录。';
  return null;
 }
 export function mappingState(model) {
