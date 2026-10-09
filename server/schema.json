@@ -1,0 +1,1283 @@
+{
+  "tables": [
+    {
+      "rls": true,
+      "name": "ling_gateway_keys",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "key_hash",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "prefix",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "admin_access",
+          "type": "boolean",
+          "default": "false",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "default": "true",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        }
+      ],
+      "indexes": [],
+      "constraints": [
+        {
+          "name": "ling_gateway_keys_user_id_fkey",
+          "type": "f",
+          "definition": "FOREIGN KEY (user_id) REFERENCES ling_gateway_users(id)"
+        },
+        {
+          "name": "ling_gateway_keys_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "ling_gateway_keys_key_hash_key",
+          "type": "u",
+          "definition": "UNIQUE (key_hash)"
+        }
+      ]
+    },
+    {
+      "rls": true,
+      "name": "ling_gateway_login_limits",
+      "columns": [
+        {
+          "name": "ip_hash",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "window_start",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "attempts",
+          "type": "integer",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        }
+      ],
+      "indexes": [],
+      "constraints": [
+        {
+          "name": "ling_gateway_login_limits_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (ip_hash)"
+        }
+      ]
+    },
+    {
+      "rls": true,
+      "name": "ling_gateway_logs",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "model",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "default": "'pending'::text",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "attempts",
+          "type": "jsonb",
+          "default": "'[]'::jsonb",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "prompt_tokens",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "completion_tokens",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "refunded",
+          "type": "boolean",
+          "default": "false",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "routing_mode",
+          "type": "text",
+          "default": "'legacy'::text",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX ling_gateway_logs_user ON public.ling_gateway_logs USING btree (user_id, started_at DESC)",
+        "CREATE INDEX ling_gateway_logs_recent ON public.ling_gateway_logs USING btree (started_at DESC)"
+      ],
+      "constraints": [
+        {
+          "name": "ling_gateway_logs_routing_mode_check",
+          "type": "c",
+          "definition": "CHECK ((routing_mode = ANY (ARRAY['smart'::text, 'parallel'::text, 'sequential'::text, 'legacy'::text])))"
+        },
+        {
+          "name": "ling_gateway_logs_user_id_fkey",
+          "type": "f",
+          "definition": "FOREIGN KEY (user_id) REFERENCES ling_gateway_users(id)"
+        },
+        {
+          "name": "ling_gateway_logs_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "rls": true,
+      "name": "ling_gateway_models",
+      "columns": [
+        {
+          "name": "provider_id",
+          "type": "uuid",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "model_id",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "listed",
+          "type": "boolean",
+          "default": "true",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "default": "'catalog'::text",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "default": "'unchecked'::text",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "http_status",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "latency_ms",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "config_hash",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "returned_model",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "discovered_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "attempts",
+          "type": "integer",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "lease_token",
+          "type": "uuid",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "lease_until",
+          "type": "timestamp with time zone",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "canonical_id",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "canonical_source",
+          "type": "text",
+          "default": "'auto'::text",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "first_token_ms",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "diagnostic",
+          "type": "jsonb",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX ling_gateway_models_canonical ON public.ling_gateway_models USING btree (canonical_id, provider_id) WHERE (listed AND (canonical_id IS NOT NULL))"
+      ],
+      "constraints": [
+        {
+          "name": "ling_gateway_canonical_id_check",
+          "type": "c",
+          "definition": "CHECK (((canonical_id IS NULL) OR ((length(canonical_id) <= 200) AND (canonical_id ~ '^(?:(?:假流式|抗截断|防截断)-)?[a-z0-9][a-z0-9._-]{0,199}$'::text))))"
+        },
+        {
+          "name": "ling_gateway_models_canonical_source_check",
+          "type": "c",
+          "definition": "CHECK ((canonical_source = ANY (ARRAY['auto'::text, 'manual'::text])))"
+        },
+        {
+          "name": "ling_gateway_models_diagnostic_check",
+          "type": "c",
+          "definition": "CHECK (((diagnostic IS NULL) OR ((jsonb_typeof(diagnostic) = 'object'::text) AND (octet_length((diagnostic)::text) <= 4096))))"
+        },
+        {
+          "name": "ling_gateway_models_first_token_ms_check",
+          "type": "c",
+          "definition": "CHECK ((first_token_ms >= 0))"
+        },
+        {
+          "name": "ling_gateway_models_model_id_check",
+          "type": "c",
+          "definition": "CHECK (((length(model_id) >= 1) AND (length(model_id) <= 200)))"
+        },
+        {
+          "name": "ling_gateway_models_status_check",
+          "type": "c",
+          "definition": "CHECK ((status = ANY (ARRAY['unchecked'::text, 'available'::text, 'timeout'::text, 'rate_limited'::text, 'unauthorized'::text, 'not_found'::text, 'unsupported'::text, 'empty'::text, 'network_error'::text, 'error'::text, 'no_credit'::text])))"
+        },
+        {
+          "name": "ling_gateway_models_provider_id_fkey",
+          "type": "f",
+          "definition": "FOREIGN KEY (provider_id) REFERENCES ling_gateway_providers(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "ling_gateway_models_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (provider_id, model_id)"
+        }
+      ]
+    },
+    {
+      "rls": true,
+      "name": "ling_gateway_provider_usage",
+      "columns": [
+        {
+          "name": "provider_id",
+          "type": "uuid",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "day",
+          "type": "date",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "requests",
+          "type": "integer",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "minute",
+          "type": "timestamp with time zone",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "minute_requests",
+          "type": "integer",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        }
+      ],
+      "indexes": [],
+      "constraints": [
+        {
+          "name": "ling_gateway_provider_usage_provider_id_fkey",
+          "type": "f",
+          "definition": "FOREIGN KEY (provider_id) REFERENCES ling_gateway_providers(id)"
+        },
+        {
+          "name": "ling_gateway_provider_usage_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (provider_id, day)"
+        }
+      ]
+    },
+    {
+      "rls": true,
+      "name": "ling_gateway_providers",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "base_url",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "secret_cipher",
+          "type": "jsonb",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "default": "false",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "priority",
+          "type": "integer",
+          "default": "10",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "aliases",
+          "type": "jsonb",
+          "default": "'{}'::jsonb",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "daily_limit",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "rpm_limit",
+          "type": "integer",
+          "default": "10",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "failures",
+          "type": "integer",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "open_until",
+          "type": "timestamp with time zone",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "probe_until",
+          "type": "timestamp with time zone",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "total_attempts",
+          "type": "bigint",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "total_errors",
+          "type": "bigint",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "latency_ms",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "last_status",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        }
+      ],
+      "indexes": [],
+      "constraints": [
+        {
+          "name": "ling_gateway_providers_daily_limit_check",
+          "type": "c",
+          "definition": "CHECK (((daily_limit IS NULL) OR ((daily_limit >= 1) AND (daily_limit <= 1000000))))"
+        },
+        {
+          "name": "ling_gateway_providers_kind_check",
+          "type": "c",
+          "definition": "CHECK ((kind = ANY (ARRAY['gemini'::text, 'openrouter'::text, 'cloudflare'::text, 'custom'::text])))"
+        },
+        {
+          "name": "ling_gateway_providers_priority_check",
+          "type": "c",
+          "definition": "CHECK (((priority >= 0) AND (priority <= 10000)))"
+        },
+        {
+          "name": "ling_gateway_providers_rpm_limit_check",
+          "type": "c",
+          "definition": "CHECK (((rpm_limit >= 1) AND (rpm_limit <= 1000)))"
+        },
+        {
+          "name": "ling_gateway_providers_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "rls": true,
+      "name": "ling_gateway_replies",
+      "columns": [
+        {
+          "name": "log_id",
+          "type": "uuid",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "provider_id",
+          "type": "uuid",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "provider_name",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "upstream_model",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "returned_model",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "choice_index",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "http_status",
+          "type": "integer",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "latency_ms",
+          "type": "integer",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "message",
+          "type": "jsonb",
+          "default": "'{}'::jsonb",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "finish_reason",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "usage",
+          "type": "jsonb",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "first_token_ms",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "diagnostic",
+          "type": "jsonb",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        }
+      ],
+      "indexes": [],
+      "constraints": [
+        {
+          "name": "ling_gateway_replies_diagnostic_check",
+          "type": "c",
+          "definition": "CHECK (((diagnostic IS NULL) OR ((jsonb_typeof(diagnostic) = 'object'::text) AND (octet_length((diagnostic)::text) <= 4096))))"
+        },
+        {
+          "name": "ling_gateway_replies_first_token_ms_check",
+          "type": "c",
+          "definition": "CHECK ((first_token_ms >= 0))"
+        },
+        {
+          "name": "ling_gateway_replies_status_check",
+          "type": "c",
+          "definition": "CHECK ((status = ANY (ARRAY['success'::text, 'partial'::text, 'failed'::text, 'skipped'::text])))"
+        },
+        {
+          "name": "ling_gateway_replies_log_id_fkey",
+          "type": "f",
+          "definition": "FOREIGN KEY (log_id) REFERENCES ling_gateway_logs(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "ling_gateway_replies_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (log_id, provider_id)"
+        }
+      ]
+    },
+    {
+      "rls": true,
+      "name": "ling_gateway_settings",
+      "columns": [
+        {
+          "name": "id",
+          "type": "boolean",
+          "default": "true",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "default_daily_limit",
+          "type": "integer",
+          "default": "20",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "owner_reserve",
+          "type": "integer",
+          "default": "100",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "max_output_tokens",
+          "type": "bigint",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "public_enabled",
+          "type": "boolean",
+          "default": "false",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "monitor_hash",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "routing_mode",
+          "type": "text",
+          "default": "'smart'::text",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "hedge_delay_ms",
+          "type": "integer",
+          "default": "4000",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "multi_reply_limit",
+          "type": "integer",
+          "default": "3",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "access_code_hash",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "first_output_timeout_ms",
+          "type": "integer",
+          "default": "90000",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        }
+      ],
+      "indexes": [],
+      "constraints": [
+        {
+          "name": "ling_gateway_settings_access_code_hash_check",
+          "type": "c",
+          "definition": "CHECK (((access_code_hash IS NULL) OR (access_code_hash ~ '^[0-9a-f]{64}$'::text)))"
+        },
+        {
+          "name": "ling_gateway_settings_default_daily_limit_check",
+          "type": "c",
+          "definition": "CHECK (((default_daily_limit >= 0) AND (default_daily_limit <= 100000)))"
+        },
+        {
+          "name": "ling_gateway_settings_first_output_timeout_ms_check",
+          "type": "c",
+          "definition": "CHECK (((first_output_timeout_ms >= 5000) AND (first_output_timeout_ms <= 120000)))"
+        },
+        {
+          "name": "ling_gateway_settings_hedge_delay_ms_check",
+          "type": "c",
+          "definition": "CHECK (((hedge_delay_ms >= 1000) AND (hedge_delay_ms <= 30000)))"
+        },
+        {
+          "name": "ling_gateway_settings_id_check",
+          "type": "c",
+          "definition": "CHECK (id)"
+        },
+        {
+          "name": "ling_gateway_settings_max_output_tokens_check",
+          "type": "c",
+          "definition": "CHECK (((max_output_tokens IS NULL) OR ((max_output_tokens >= 1) AND (max_output_tokens <= '9007199254740991'::bigint))))"
+        },
+        {
+          "name": "ling_gateway_settings_multi_reply_limit_check",
+          "type": "c",
+          "definition": "CHECK (((multi_reply_limit = 0) OR ((multi_reply_limit >= 2) AND (multi_reply_limit <= 20))))"
+        },
+        {
+          "name": "ling_gateway_settings_owner_reserve_check",
+          "type": "c",
+          "definition": "CHECK (((owner_reserve >= 0) AND (owner_reserve <= 100000)))"
+        },
+        {
+          "name": "ling_gateway_settings_routing_mode_check",
+          "type": "c",
+          "definition": "CHECK ((routing_mode = ANY (ARRAY['smart'::text, 'parallel'::text, 'sequential'::text])))"
+        },
+        {
+          "name": "ling_gateway_settings_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "rls": true,
+      "name": "ling_gateway_usage",
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "day",
+          "type": "date",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "requests",
+          "type": "integer",
+          "default": "0",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        }
+      ],
+      "indexes": [],
+      "constraints": [
+        {
+          "name": "ling_gateway_usage_user_id_fkey",
+          "type": "f",
+          "definition": "FOREIGN KEY (user_id) REFERENCES ling_gateway_users(id)"
+        },
+        {
+          "name": "ling_gateway_usage_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (user_id, day)"
+        }
+      ]
+    },
+    {
+      "rls": true,
+      "name": "ling_gateway_users",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "role",
+          "type": "text",
+          "default": "'user'::text",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "daily_limit",
+          "type": "integer",
+          "default": null,
+          "identity": "",
+          "not_null": false,
+          "generated": ""
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "default": "true",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "identity": "",
+          "not_null": true,
+          "generated": ""
+        }
+      ],
+      "indexes": [],
+      "constraints": [
+        {
+          "name": "ling_gateway_users_daily_limit_check",
+          "type": "c",
+          "definition": "CHECK (((daily_limit IS NULL) OR ((daily_limit >= 0) AND (daily_limit <= 1000000))))"
+        },
+        {
+          "name": "ling_gateway_users_role_check",
+          "type": "c",
+          "definition": "CHECK ((role = ANY (ARRAY['admin'::text, 'user'::text])))"
+        },
+        {
+          "name": "ling_gateway_users_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "args": [
+        "p_provider",
+        "p_admin"
+      ],
+      "name": "ling_gateway_claim",
+      "arg_types": [
+        "uuid",
+        "boolean"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_claim(p_provider uuid, p_admin boolean)\n RETURNS boolean\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\ndeclare p public.ling_gateway_providers; s public.ling_gateway_settings; q public.ling_gateway_provider_usage; d date; m timestamptz;\nbegin\n select * into p from public.ling_gateway_providers where id=p_provider for update;\n if not found or not p.enabled then return false;end if;\n if p.open_until>now() or p.probe_until>now() then return false;end if;\n select * into s from public.ling_gateway_settings where id;\n d := (now() at time zone 'Asia/Shanghai')::date; m := date_trunc('minute',now());\n insert into public.ling_gateway_provider_usage(provider_id,day) values(p_provider,d) on conflict do nothing;\n select * into q from public.ling_gateway_provider_usage where provider_id=p_provider and day=d for update;\n if p.daily_limit is not null and q.requests>=greatest(0,p.daily_limit-case when p_admin then 0 else least(s.owner_reserve,p.daily_limit/2) end) then return false;end if;\n if q.minute=m and q.minute_requests>=p.rpm_limit then return false;end if;\n update public.ling_gateway_provider_usage set requests=requests+1,minute=m,\n minute_requests=case when minute=m then minute_requests+1 else 1 end where provider_id=p_provider and day=d;\n if p.open_until is not null then update public.ling_gateway_providers set probe_until=now()+interval '130 seconds' where id=p_provider;end if;\n return true;\nend $function$\n"
+    },
+    {
+      "args": [
+        "p_log",
+        "p_status",
+        "p_attempts",
+        "p_prompt",
+        "p_completion"
+      ],
+      "name": "ling_gateway_finish",
+      "arg_types": [
+        "uuid",
+        "text",
+        "jsonb",
+        "integer",
+        "integer"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_finish(p_log uuid, p_status text, p_attempts jsonb, p_prompt integer DEFAULT NULL::integer, p_completion integer DEFAULT NULL::integer)\n RETURNS void\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\ndeclare l public.ling_gateway_logs;\nbegin\n select * into l from public.ling_gateway_logs where id=p_log for update;\n if not found or l.status<>'pending' then return;end if;\n update public.ling_gateway_logs set status=p_status,attempts=p_attempts,prompt_tokens=p_prompt,completion_tokens=p_completion,finished_at=now(),refunded=p_status='failed' where id=p_log;\n if p_status='failed' then update public.ling_gateway_usage set requests=greatest(0,requests-1)\n where user_id=l.user_id and day=(l.started_at at time zone 'Asia/Shanghai')::date;end if;\nend $function$\n"
+    },
+    {
+      "args": [
+        "p_ip"
+      ],
+      "name": "ling_gateway_login_attempt",
+      "arg_types": [
+        "text"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_login_attempt(p_ip text)\n RETURNS boolean\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\ndeclare n integer;\nbegin\n insert into public.ling_gateway_login_limits(ip_hash,attempts) values(p_ip,1)\n on conflict(ip_hash) do update set attempts=case when ling_gateway_login_limits.window_start<now()-interval '15 minutes' then 1 else ling_gateway_login_limits.attempts+1 end,\n window_start=case when ling_gateway_login_limits.window_start<now()-interval '15 minutes' then now() else ling_gateway_login_limits.window_start end\n returning attempts into n;\n return n<=10;\nend $function$\n"
+    },
+    {
+      "args": null,
+      "name": "ling_gateway_maintenance",
+      "arg_types": null,
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_maintenance()\n RETURNS void\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\ndeclare l record;v_status text;v_attempts jsonb;begin\n for l in select id from public.ling_gateway_logs where status='pending' and started_at<now()-interval '5 minutes' loop\n  select case when count(*) filter(where status in ('success','partial'))>0 then 'partial' else 'failed' end,\n   coalesce(jsonb_agg(jsonb_build_object('provider_id',provider_id,'status',http_status,'latency_ms',latency_ms,'outcome',status)),'[]'::jsonb)\n   into v_status,v_attempts from public.ling_gateway_replies where log_id=l.id;\n  perform public.ling_gateway_finish(l.id,v_status,v_attempts);\n end loop;\n delete from public.ling_gateway_logs where started_at<now()-interval '30 days';\n delete from public.ling_gateway_usage where day<current_date-90;\n delete from public.ling_gateway_provider_usage where day<current_date-90;\n delete from public.ling_gateway_login_limits where window_start<now()-interval '1 day';\n delete from public.ling_gateway_keys where admin_access and expires_at<now()-interval '1 day';\nend $function$\n"
+    },
+    {
+      "args": [
+        "p_provider",
+        "p_models"
+      ],
+      "name": "ling_gateway_model_catalog",
+      "arg_types": [
+        "uuid",
+        "jsonb"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_model_catalog(p_provider uuid, p_models jsonb)\n RETURNS void\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\nbegin\n perform 1 from public.ling_gateway_providers where id=p_provider for update;\n if not found then raise exception 'provider not found';end if;\n if jsonb_typeof(p_models)<>'array' or jsonb_array_length(p_models)>1000 then raise exception 'invalid catalog';end if;\n update public.ling_gateway_models set listed=false where provider_id=p_provider and source='catalog';\n insert into public.ling_gateway_models(provider_id,model_id,name,source,listed,canonical_id)\n select p_provider,m->>'id',left(coalesce(m->>'name',m->>'id'),200),'catalog',true,m->>'canonical_id' from jsonb_array_elements(p_models) m\n on conflict(provider_id,model_id) do update set name=excluded.name,listed=true,source='catalog',discovered_at=now(),\n canonical_id=case when ling_gateway_models.canonical_source='manual' then ling_gateway_models.canonical_id else coalesce(excluded.canonical_id,ling_gateway_models.canonical_id) end;\nend $function$\n"
+    },
+    {
+      "args": [
+        "p_provider",
+        "p_model"
+      ],
+      "name": "ling_gateway_probe_claim",
+      "arg_types": [
+        "uuid",
+        "text"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_probe_claim(p_provider uuid, p_model text)\n RETURNS jsonb\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\ndeclare p public.ling_gateway_providers; v public.ling_gateway_models; q public.ling_gateway_provider_usage; d date;m timestamptz; lease uuid;\nbegin\n select * into p from public.ling_gateway_providers where id=p_provider for update;\n if not found or p.secret_cipher is null then return jsonb_build_object('error','provider_key_required');end if;\n select * into v from public.ling_gateway_models where provider_id=p_provider and model_id=p_model for update;\n if not found then return jsonb_build_object('error','model_not_registered');end if;\n if v.lease_until>now() or (select count(*) from public.ling_gateway_models where provider_id=p_provider and lease_until>now())>=2\n then return jsonb_build_object('error','probe_busy','retry_after',2);end if;\n d:=(now() at time zone 'Asia/Shanghai')::date;m:=date_trunc('minute',now());\n insert into public.ling_gateway_provider_usage(provider_id,day) values(p_provider,d) on conflict do nothing;\n select * into q from public.ling_gateway_provider_usage where provider_id=p_provider and day=d for update;\n if p.daily_limit is not null and q.requests>=p.daily_limit then return jsonb_build_object('error','provider_daily_limit');end if;\n if q.minute=m and q.minute_requests>=p.rpm_limit then return jsonb_build_object('error','provider_minute_limit','retry_after',greatest(1,ceil(extract(epoch from (m+interval '1 minute'-now())))::integer));end if;\n update public.ling_gateway_provider_usage set requests=requests+1,minute=m,\n minute_requests=case when minute=m then minute_requests+1 else 1 end where provider_id=p_provider and day=d;\n lease:=gen_random_uuid();\n update public.ling_gateway_models set lease_token=lease,lease_until=now()+interval '90 seconds',attempts=attempts+1 where provider_id=p_provider and model_id=p_model;\n return jsonb_build_object('lease',lease);\nend $function$\n"
+    },
+    {
+      "args": [
+        "p_lease",
+        "p_status",
+        "p_http",
+        "p_latency",
+        "p_hash",
+        "p_returned",
+        "p_diagnostic"
+      ],
+      "name": "ling_gateway_probe_finish",
+      "arg_types": [
+        "uuid",
+        "text",
+        "integer",
+        "integer",
+        "text",
+        "text",
+        "jsonb"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_probe_finish(p_lease uuid, p_status text, p_http integer, p_latency integer, p_hash text, p_returned text DEFAULT NULL::text, p_diagnostic jsonb DEFAULT NULL::jsonb)\n RETURNS boolean\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\ndeclare n integer;begin\n if p_status='cancelled' then\n  update public.ling_gateway_models set lease_token=null,lease_until=null where lease_token=p_lease;\n else\n  update public.ling_gateway_models set status=p_status,http_status=p_http,latency_ms=p_latency,\n   first_token_ms=case when p_status='available' then p_latency else first_token_ms end,\n   config_hash=p_hash,returned_model=left(p_returned,200),diagnostic=p_diagnostic,checked_at=now(),lease_token=null,lease_until=null where lease_token=p_lease;\n end if;\n get diagnostics n=row_count;return n=1;\nend $function$\n"
+    },
+    {
+      "args": [
+        "p_provider",
+        "p_status",
+        "p_latency",
+        "p_success",
+        "p_health",
+        "p_retry"
+      ],
+      "name": "ling_gateway_provider_result",
+      "arg_types": [
+        "uuid",
+        "integer",
+        "integer",
+        "boolean",
+        "boolean",
+        "integer"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_provider_result(p_provider uuid, p_status integer, p_latency integer, p_success boolean, p_health boolean DEFAULT false, p_retry integer DEFAULT 0)\n RETURNS void\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\nbegin\n update public.ling_gateway_providers set\n total_attempts=total_attempts+case when p_health then 0 else 1 end,\n total_errors=total_errors+case when not p_health and not p_success then 1 else 0 end,\n latency_ms=p_latency,last_status=p_status,checked_at=now(),\n failures=case when p_health then failures when p_success then 0 when p_status=429 or p_status>=500 or p_status in (0,401,403,404) then failures+1 else failures end,\n open_until=case when p_health then open_until when p_success then null\n when p_status=429 then now()+make_interval(secs=>greatest(60,least(p_retry,86400)))\n when p_status in (401,403,404) then now()+interval '10 minutes'\n when (p_status=0 or p_status>=500) and failures>=2 then now()+make_interval(secs=>least(300,30*power(2,least(failures-2,3))::integer))\n else open_until end,\n probe_until=case when p_health then probe_until else null end\n where id=p_provider;\nend $function$\n"
+    },
+    {
+      "args": [
+        "p_user",
+        "p_model"
+      ],
+      "name": "ling_gateway_reserve",
+      "arg_types": [
+        "uuid",
+        "text"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_reserve(p_user uuid, p_model text)\n RETURNS jsonb\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\ndeclare u public.ling_gateway_users; s public.ling_gateway_settings; n integer; d date; l uuid;\nbegin\n select * into u from public.ling_gateway_users where id=p_user for update;\n if u.id is null or not u.enabled then return jsonb_build_object('error','disabled'); end if;\n select * into s from public.ling_gateway_settings where id;\n if u.role<>'admin' and not s.public_enabled then return jsonb_build_object('error','public_closed');end if;\n d := (now() at time zone 'Asia/Shanghai')::date;\n insert into public.ling_gateway_usage(user_id,day) values(p_user,d) on conflict do nothing;\n select requests into n from public.ling_gateway_usage where user_id=p_user and day=d;\n if not (u.role='admin' and u.daily_limit is null) and n>=coalesce(u.daily_limit,s.default_daily_limit)\n then return jsonb_build_object('error','daily_quota_exceeded');end if;\n if (select count(*) from public.ling_gateway_logs where user_id=p_user and status='pending' and started_at>now()-interval '3 minutes')>=2\n then return jsonb_build_object('error','concurrency_limit');end if;\n update public.ling_gateway_usage set requests=requests+1 where user_id=p_user and day=d;\n insert into public.ling_gateway_logs(user_id,model) values(p_user,p_model) returning id into l;\n return jsonb_build_object('id',l,'day',d);\nend $function$\n"
+    },
+    {
+      "args": [
+        "p_user",
+        "p_model",
+        "p_mode"
+      ],
+      "name": "ling_gateway_reserve_routed",
+      "arg_types": [
+        "uuid",
+        "text",
+        "text"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_reserve_routed(p_user uuid, p_model text, p_mode text)\n RETURNS jsonb\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\ndeclare r jsonb;\nbegin\n if p_mode is null or p_mode not in ('smart','parallel','sequential') then raise exception 'invalid routing mode';end if;\n r:=public.ling_gateway_reserve(p_user,p_model);\n if r ? 'id' then update public.ling_gateway_logs set routing_mode=p_mode where id=(r->>'id')::uuid;end if;\n return r;\nend $function$\n"
+    },
+    {
+      "args": [
+        "p_provider",
+        "p_status",
+        "p_latency",
+        "p_success",
+        "p_retry"
+      ],
+      "name": "ling_gateway_route_result",
+      "arg_types": [
+        "uuid",
+        "integer",
+        "integer",
+        "boolean",
+        "integer"
+      ],
+      "definition": "CREATE OR REPLACE FUNCTION public.ling_gateway_route_result(p_provider uuid, p_status integer, p_latency integer, p_success boolean, p_retry integer DEFAULT 0)\n RETURNS void\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\nbegin\n perform public.ling_gateway_provider_result(p_provider,case when p_status in (403,404) then 400 else p_status end,p_latency,p_success,false,p_retry);\n if p_status in (403,404) then update public.ling_gateway_providers set last_status=p_status where id=p_provider;end if;\nend $function$\n"
+    }
+  ]
+}

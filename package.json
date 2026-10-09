@@ -1,14 +1,21 @@
 {
   "name": "ling-ai-gateway",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node server/main.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check src/gateway.mjs && node --check src/diagnostics.mjs && node --check src/model-checks.mjs && node --check src/model-directory.mjs && node --check src/model-names.mjs && node --check src/fanout.mjs && node --check src/routing.mjs && node --check public/app.js && node --check public/directory-checks.js && node --check public/model-checks.js && node --check public/mapping-review.js && node --check public/chat-replies.js && node --check src/worker.mjs",
+    "check": "node scripts/check.mjs",
     "dev": "node scripts/dev.mjs"
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
   }
 }

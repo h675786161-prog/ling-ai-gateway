@@ -3,6 +3,7 @@ import {createModelDirectory,configurationHash} from './model-directory.mjs';
 import {createFanout} from './fanout.mjs';
 import {ROUTING_MODES,routingPolicy} from './routing.mjs';
 import {readUpstreamError,failureDiagnostic,allFailedMessage} from './diagnostics.mjs';
+import {exportGatewaySnapshot} from './migration.mjs';
 export const ALIASES = ['fast','smart','rp','backup'];
 const encoder = new TextEncoder();
 const DAY = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -110,8 +111,16 @@ export function createGateway(env,options={}) {
     await persist('provider_result',{p_provider:p.id,p_status:status,p_latency:Date.now()-start,p_success:status>=200&&status<300,p_health:true,p_retry:0});
     return {id:p.id,status,ok:status>=200&&status<300,latency_ms:Date.now()-start};
   }
+  async function checkHealth(){
+    const providers=(await db.table('providers','?enabled=eq.true')).filter(p=>p.secret_cipher);
+    return {checks:await Promise.all(providers.slice(0,12).map(health))};
+  }
   async function admin(req,path,auth) {
     const user=auth.user;
+    if(path==='/admin/migration/export'&&req.method==='POST'){
+      const b=await readJSON(req,16384);
+      return reply(await exportGatewaySnapshot({db,secret:env.ENCRYPTION_KEY||env.SUPABASE_SERVICE_ROLE_KEY,unseal,seal,digest,publicKey:b.public_key}));
+    }
     if(path==='/admin/model-directory'&&req.method==='GET')return reply(await directory.list(false));
     if(path==='/admin/models'&&req.method==='GET')return reply(await modelChecks.list(new URL(req.url).searchParams.get('provider_id')));
     if(path.startsWith('/admin/models/')&&req.method==='POST'){
@@ -282,17 +291,16 @@ export function createGateway(env,options={}) {
     }
     await finish('failed');return reply({error:{code:'all_providers_unavailable',type:'gateway_error',message:allFailedMessage(b.model,attempts)}},503);
   }
-  return async req => {
+  const handler=async req => {
     try {
       const url=new URL(req.url);let path=url.pathname.replace(/^(?:\/functions\/v1)?\/ling-ai-gateway(?=\/|$)/,'').replace(/\/$/,'')||'/';
       if(req.method==='OPTIONS')return cors(new Response(null,{status:204}));
-      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.5.3'}));
+      if(path==='/health'&&req.method==='GET')return cors(reply({ok:true,service:'ling-ai-gateway',version:'0.6.0'}));
       if(path==='/internal/health'&&req.method==='POST') {
         const token=(req.headers.get('authorization')||'').match(/^Bearer (\S+)$/)?.[1];
         const settings=(await db.table('settings'))[0];
         if(!token||!settings.monitor_hash||!await equal(await digest(token),settings.monitor_hash))return cors(error('unauthorized',401));
-        const providers=(await db.table('providers','?enabled=eq.true')).filter(p=>p.secret_cipher);
-        return cors(reply({checks:await Promise.all(providers.slice(0,12).map(health))}));
+        return cors(reply(await checkHealth()));
       }
       if(path==='/admin/login'&&req.method==='POST') {
         const b=await readJSON(req,2048);
@@ -320,4 +328,7 @@ export function createGateway(env,options={}) {
       return cors(error(publicErrors.includes(e.message)||/^model_catalog_http_\d+$/.test(e.message)?e.message:'gateway_unavailable',e.message==='body_too_large'?413:inputErrors.includes(e.message)?400:503));
     }
   };
+  // Only the trusted server scheduler can call this function; HTTP still requires authentication.
+  handler.checkHealth=checkHealth;
+  return handler;
 }
