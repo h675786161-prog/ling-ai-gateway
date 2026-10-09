@@ -198,7 +198,7 @@ export function createGateway(env,options={}) {
     return error('not_found',404);
   }
   async function chat(req,auth) {
-    const deadline=Date.now()+130000;
+    const deadline=Date.now()+(options.totalTimeout??130000);
     const b=await readJSON(req);
     if(typeof b.model!=='string'||!b.model||b.model.length>200)return error('unknown_model');
     if(!Array.isArray(b.messages)||!b.messages.length||b.messages.length>1000||b.messages.some(m=>!m||!['system','developer','user','assistant','tool','function'].includes(m.role)))return error('invalid_messages');

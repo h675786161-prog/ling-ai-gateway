@@ -1,4 +1,4 @@
-import {manifest,identifier} from './schema.mjs';
+import {manifest,identifier,transaction} from './schema.mjs';
 
 const tables=new Map(manifest.tables.map(t=>[t.name.slice('ling_gateway_'.length),t]));
 const functions=new Map(manifest.functions.map(f=>[f.name.slice('ling_gateway_'.length),f]));
@@ -7,7 +7,26 @@ functions.set('migration_snapshot',{name:'ling_gateway_migration_snapshot',args:
 export class PostgresDB{
  constructor(pool){this.pool=pool;}
  describe(name){const table=tables.get(name);if(!table)throw new Error('invalid_database_table');return table;}
- async request(){throw new Error('legacy_shared_gate_disabled');}
+ async request(path,method,data,headers={}){
+  // Manual catalog additions are the only PostgREST-style request used by the gateway.
+  // Keep this narrow so a legacy request can never reach unrelated application tables.
+  if(path!=='ling_gateway_models?on_conflict=provider_id,model_id'||method!=='POST'||headers.Prefer!=='resolution=merge-duplicates,return=representation')throw new Error('legacy_shared_gate_disabled');
+  if(!Array.isArray(data)||!data.length||data.length>100)throw new Error('invalid_database_write');
+  const columns=new Map(this.describe('models').columns.map(c=>[c.name,c]));
+  return transaction(this.pool,async client=>{
+   const result=[];
+   for(const row of data){
+    const fields=Object.keys(row||{});
+    if(fields.some(f=>!columns.has(f))||!fields.includes('provider_id')||!fields.includes('model_id'))throw new Error('invalid_database_column');
+    const updates=fields.filter(f=>!['provider_id','model_id'].includes(f));
+    if(!updates.length)throw new Error('empty_database_write');
+    const values=fields.map(f=>columns.get(f).type==='jsonb'&&row[f]!==null?JSON.stringify(row[f]):row[f]);
+    const sql='insert into public.ling_gateway_models ('+fields.map(identifier).join(',')+') values ('+fields.map((_,i)=>'$'+(i+1)).join(',')+') on conflict (provider_id,model_id) do update set '+updates.map(f=>identifier(f)+'=excluded.'+identifier(f)).join(',')+' returning *';
+    result.push(...(await client.query(sql,values)).rows);
+   }
+   return result;
+  });
+ }
  async rpc(name,args={}){
   const fn=functions.get(name);if(!fn)throw new Error('invalid_database_function');
   const names=Object.keys(args),values=[];

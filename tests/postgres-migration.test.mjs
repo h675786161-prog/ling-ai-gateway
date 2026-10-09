@@ -98,10 +98,17 @@ test('standalone HTTP serves the gated application and authenticated model direc
  assert.equal((await fetch(base+'/internal/health',{method:'POST'})).status,401);
  const login=await(await fetch(base+'/admin/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:gate})})).json();assert.ok(login.session.key);
  const overview=await(await fetch(base+'/admin/overview',{headers:{authorization:'Bearer '+login.session.key}})).json();assert.equal(overview.providers.length,1);assert.ok(!JSON.stringify(overview).includes(upstreamKey));assert.ok(!overview.providers[0].secret_cipher);
+ const providerId=overview.providers[0].id;
+ const hostile="manual-model'); DROP TABLE ling_gateway_users; --";
+ const added=await fetch(base+'/admin/models/add',{method:'POST',headers:{authorization:'Bearer '+login.session.key,'content-type':'application/json'},body:JSON.stringify({provider_id:providerId,models:['agycli-gemini-3.8-flash-high',hostile]})});
+ assert.equal(added.status,200);assert.equal((await added.json()).models.length,2);
+ const original=(await db.table('models','?model_id=eq.agycli-gemini-3.8-flash-high'))[0];assert.equal(original.canonical_source,'manual');assert.equal(original.status,'available');
+ assert.equal((await db.table('models','?model_id=eq.'+encodeURIComponent(hostile))).length,1);assert.equal((await db.table('users')).length,1);
+ await assert.rejects(db.request('private_site_state','GET'),/legacy_shared_gate_disabled/);
  const rsa=await crypto.subtle.generateKey({name:'RSA-OAEP',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},false,['encrypt','decrypt']);
  const publicKey=await crypto.subtle.exportKey('jwk',rsa.publicKey);
  const exported=await(await fetch(base+'/admin/migration/export',{method:'POST',headers:{authorization:'Bearer '+login.session.key,'content-type':'application/json'},body:JSON.stringify({public_key:publicKey})})).json();
- assert.equal(exported.counts.models,1);assert.ok(exported.envelope);assert.ok(!JSON.stringify(exported).includes(upstreamKey));
+ assert.equal(exported.counts.models,2);assert.ok(exported.envelope);assert.ok(!JSON.stringify(exported).includes(upstreamKey));
  assert.equal((await decryptSnapshot(exported.envelope,rsa.privateKey)).tables.settings[0].access_code_hash,await digest(gate));
 });
 
