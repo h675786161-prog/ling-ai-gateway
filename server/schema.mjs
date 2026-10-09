@@ -3,6 +3,9 @@ import {readFile} from 'node:fs/promises';
 export const manifest=JSON.parse(await readFile(new URL('./schema.json',import.meta.url),'utf8'));
 export const identifier=name=>{if(!/^[a-z][a-z0-9_]*$/.test(name))throw new Error('invalid_database_identifier');return '"'+name+'"';};
 export const tableNames=manifest.tables.map(t=>t.name.slice('ling_gateway_'.length));
+// A live standalone stream may run for one hour; repair only records beyond that window.
+const maintenanceDefinition=manifest.functions.find(f=>f.name==='ling_gateway_maintenance').definition;
+export const maintenanceSQL=maintenanceDefinition.replace("interval '5 minutes'","interval '70 minutes'")+';';
 export const snapshotSQL='create or replace function public.ling_gateway_migration_snapshot() returns jsonb language sql stable security invoker set search_path = \'\' as $snapshot$ select jsonb_build_object('+manifest.tables.map(t=>"'"+t.name.slice('ling_gateway_'.length)+"',coalesce((select jsonb_agg(to_jsonb(t)) from public."+identifier(t.name)+" t),'[]'::jsonb)").join(',')+'); $snapshot$; revoke all on function public.ling_gateway_migration_snapshot() from public;';
 
 export function schemaSQL(){
@@ -24,7 +27,7 @@ export function schemaSQL(){
  }
  for(const f of manifest.functions){
   if(!f.name.startsWith('ling_gateway_'))throw new Error('unexpected_database_function');
-  parts.push(f.definition+';');
+  parts.push(f.name==='ling_gateway_maintenance'?maintenanceSQL:f.definition+';');
   parts.push('revoke all on function public.'+identifier(f.name)+'('+(f.arg_types||[]).join(',')+') from public;');
  }
  parts.push(snapshotSQL);
@@ -45,7 +48,7 @@ export async function initializeSchema(pool){
  return transaction(pool,async client=>{
   await client.query('select pg_advisory_xact_lock(71607191)');
   const state=(await client.query("select to_regclass('public.ling_gateway_runtime') as runtime")).rows[0];
-  if(state.runtime)return false;
+  if(state.runtime){await client.query(maintenanceSQL);return false;}
   const existing=(await client.query("select count(*)::integer as count from pg_tables where schemaname='public' and tablename like 'ling_gateway_%'")).rows[0];
   if(existing.count)throw new Error('database_requires_manual_schema_review');
   await client.query(schemaSQL());

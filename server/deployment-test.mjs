@@ -26,9 +26,10 @@ export function deploymentTest(pool,token){
     const k=(await client.query('select name from public.ling_gateway_keys where id=any($1::uuid[])',[b.keys])).rows;
     const logs=(await client.query('select id,model,status from public.ling_gateway_logs where id=any($1::uuid[])',[b.logs])).rows;
     if(p.some(r=>!r.name.startsWith('迁移测试·'))||k.some(r=>!['迁移临时管理会话','迁移实测临时密钥'].includes(r.name))||logs.some(r=>!/^ling-migration-/.test(r.model)||r.status==='pending'))throw new Error('fixture_cleanup_rejected');
-    await client.query("update public.ling_gateway_usage u set requests=greatest(0,u.requests-s.n),inflight=greatest(0,u.inflight) from (select user_id,(started_at at time zone 'Asia/Shanghai')::date as day,count(*)::integer as n from public.ling_gateway_logs where id=any($1::uuid[]) and status in ('success','partial') group by user_id,day) s where u.user_id=s.user_id and u.day=s.day",[b.logs]);
+    await client.query("update public.ling_gateway_usage u set requests=greatest(0,u.requests-s.n) from (select user_id,(started_at at time zone 'Asia/Shanghai')::date as day,count(*)::integer as n from public.ling_gateway_logs where id=any($1::uuid[]) and status in ('success','partial') group by user_id,day) s where u.user_id=s.user_id and u.day=s.day",[b.logs]);
     await client.query('delete from public.ling_gateway_logs where id=any($1::uuid[])',[b.logs]);
     await client.query('delete from public.ling_gateway_models where provider_id=any($1::uuid[])',[b.providers]);
+    await client.query('delete from public.ling_gateway_provider_usage where provider_id=any($1::uuid[])',[b.providers]);
     await client.query('delete from public.ling_gateway_providers where id=any($1::uuid[])',[b.providers]);
     await client.query('delete from public.ling_gateway_keys where id=any($1::uuid[])',[b.keys]);
     const names=['users','settings','providers','keys','usage','provider_usage','logs','models','replies','login_limits'];

@@ -15,6 +15,7 @@ Northflank 运行原有网页与 Node.js 网关，独立 PostgreSQL 保存数据
 | `MIGRATION_IMPORT_TOKEN` | 单独生成的 32 字节随机值，仅用于首次迁移；导入后接口自动退役 |
 | `PORT` | `8080` |
 | `TRUST_PROXY` | Northflank 前置代理设为 `true`，只取最靠近服务的一跳客户端地址 |
+| `NODE_OPTIONS` | `--max-old-space-size=192`，为 256 MB 免费服务保留进程额外内存 |
 
 数据库首次启动仅在全新空库中创建本项目表。发现已有部分表时停止启动，避免覆盖数据。数据库连接值和服务端密钥不写入构建参数、仓库、前端或日志。
 
@@ -36,6 +37,8 @@ Northflank 运行原有网页与 Node.js 网关，独立 PostgreSQL 保存数据
 
 `npm run check` 与 `npm test` 验证原网关及真实 PostgreSQL 内核的迁移、事务回滚、权限、认证、密文、防注入、流式断开取消和 HTTP 服务。测试数据是专用虚构记录，不读取用户聊天。
 
-每小时运行维护和最多 12 条已启用线路的目录连通性检查，不发送模型生成。真正的模型可用测试仍由用户在页面选择，遵守原 RPM 和日限额。
+每小时运行维护和最多 12 条已启用线路的目录连通性检查，不发送模型生成。只修复超过 70 分钟的挂起记录，避免提前结束一小时范围内的生成。真正的模型可用测试仍由用户在页面选择，遵守原 RPM 和日限额。旧库的两个网关定时任务已停用，其他网站不受影响。
+
+当前网页：<https://p01--ling-ai-gateway--vbxqzx898zzq.code.run/>。酒馆 Base URL：`https://p01--ling-ai-gateway--vbxqzx898zzq.code.run/v1`。原应用密钥和管理访问码继续有效；新域名首次访问需重新登录。原 Pages 跳转至新站，原 Supabase API 保留转发兼容；长回复使用新地址。
 
 此容器运行现有自定义网关；New API 的专有协议与 Responses 功能需另行接入和实测，不能由本次迁移推断支持。

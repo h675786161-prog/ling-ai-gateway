@@ -1,6 +1,6 @@
 # 玲的统一 AI 入口
 
-一个自用优先的 OpenAI-compatible 网关，登录后首先进入模型检查页面。各站点的模型分别统计，在酒馆合并成不带站点前后缀的模型目录；后台按选择的聊天方式安排线路，保留所有已经启动的候选回复。默认部署使用 GitHub Pages + 已有 Supabase 免费项目；不需要常开电脑。代码公开，管理页有独立门禁，数据库不允许浏览器直接访问。
+一个自用优先的 OpenAI-compatible 网关，登录后首先进入模型检查页面。各站点的模型分别统计，在酒馆合并成不带站点前后缀的模型目录；后台按选择的聊天方式安排线路，保留所有已经启动的候选回复。当前完整部署运行于 Northflank 免费服务与私有 PostgreSQL；不需要常开电脑。原 GitHub Pages 跳转到新站，旧 Supabase API 地址转发到同一新后端。代码公开，管理页有独立门禁，数据库不允许浏览器直接访问。
 
 ## 聊天方式
 
@@ -12,7 +12,7 @@
 
 智能等待可在 1–30 秒间调整。线路先按当前模型的实测可用状态和熔断状态排序，再按站点优先级（数值小的优先）、最近首段正文耗时及错误率选择。更改站点配置后旧检查结果不参与可用优先排序。读取模型列表不会冒充实测结果。统计区分首段正文耗时和生成总耗时。
 
-每条聊天线路等待正文的上限默认 **90 秒**，可在“我的线路”设置为 5–120 秒。智能备用的软等待保持独立：例如设为 10 秒时，10 秒加发备用，原线路仍可继续思考到正文等待上限。思考片段不会冒充可用正文。整次请求约 130 秒封顶，以适配 Supabase 免费部署的 150 秒运行限制；流式等待期间发送心跳保持连接。单独模型实测仍沿用用户选定的短请求等待时间。
+每条聊天线路等待正文的上限默认 **90 秒**，可在“我的线路”设置为 5–120 秒；迁移保留玲当前的 120 秒设置。智能备用的软等待保持独立：例如设为 10 秒时，10 秒加发备用，原线路仍可继续思考到正文等待上限。思考片段不会冒充可用正文。独立服务整次生成最多一小时；流式等待期间发送心跳保持连接。单独模型实测仍沿用用户选定的短请求等待时间。旧 Supabase 转发地址仍受平台运行寿命限制，长回复请使用新地址。
 
 失败时酒馆直接显示模型名称、各站中文原因、HTTP 状态及经过脱敏的上游说明；调用记录、保存的候选回复和模型检查页都可以查看详情。会区分上游密钥/模型权限、余额/额度、速率限制、上下文过长、输出长度超过上游上限、请求格式、思考但未出正文、连接中断等。上游原文仅保留错误字段，隐藏密钥、令牌、地址、完整请求和调试栈。旧记录可按已有状态解释，未记录的上游原文不会补造。
 
@@ -36,8 +36,8 @@
 
 上游仍可能按模型能力、上下文和账号额度限制输出。流式回复不再按累计 1 MB 截断；单个异常 SSE 帧仍有 1 MB 保护，忽略流式参数的 JSON 回复最多 16 MB。云端请求超时仍然有效。
 
-- 管理页：https://h675786161-prog.github.io/ling-ai-gateway/
-- API URL / Base URL：`https://ibpffxzdjvgydnhmvmvc.supabase.co/functions/v1/ling-ai-gateway/v1`
+- 管理页：https://p01--ling-ai-gateway--vbxqzx898zzq.code.run/
+- API URL / Base URL：`https://p01--ling-ai-gateway--vbxqzx898zzq.code.run/v1`
 - API Key：在“密钥与配额”生成的应用密钥。
 - 模型：从拉取的目录选择名称，例如 `gemini-2.5-flash`、`gemini-3.6-flash`，或原名保留的 `jev`；具体可用项取决于你已经登记和启用的站点。手动保存的独立名称仍可正常选取。
 - 管理访问码：这个网关的独立访问码，另行私下交付；不记录在仓库或说明中。
@@ -72,22 +72,22 @@
 - Gemini 模板名称是配置起点，不保证当前账号或地区具有免费额度；请按账号实际可用模型修改。OpenRouter 免费类型只允许 `openrouter/free` 或 `:free` 模型。
 - 官方名称按所选聊天方式调用匹配且已启用的站点。用户一次发送计一次站内调用；每条实际上游请求分别占该站的 RPM、每日次数和 token 额度。多回复模式实际调用三个站点就是三次上游生成；未启动的站点不消耗生成额度。
 - 429 进入至少 60 秒冷却，尊重 Retry-After（上限一天）。连续 3 次网络/服务错误后冷却 30 秒，继续失败则延长，最高 300 秒。401 冷却 10 分钟；某个模型的 403/404 只记录该模型失败，不会熔断整个站点。冷却后只允许一个恢复探测；真实调用成功后关闭熔断。模型列表健康检查不会覆盖真实推理熔断。
-- 每站等待首段正文默认 90 秒，可设置 5–120 秒；智能备用等待保持独立。生成总时长约 130 秒，之后结算并保存。角色片段、心跳、纯推理不会假装成第一段文字。已经收到的部分输出保留，并标记中断。
+- 每站等待首段正文默认 90 秒，可设置 5–120 秒；智能备用等待保持独立。独立服务生成总时长最多一小时，之后结算并保存。角色片段、心跳、纯推理不会假装成第一段文字。已经收到的部分输出保留，并标记中断。
 - 用户按北京时间每日限额，最多同时 2 个请求。线路按每日调用次数及每分钟调用次数限流，并为管理员预留部分每日容量。管理员默认不限制站内日次数，仍遵守线路限制及厂商额度。
-- 调用完全失败退还用户站内次数；线路尝试次数不退还。部分输出中断仍算一次。异常终止超过 5 分钟的挂起记录由定时任务修复。
+- 调用完全失败退还用户站内次数；线路尝试次数不退还。部分输出中断仍算一次。独立服务只修复超过 70 分钟的挂起记录，避免把仍在生成的长回复提前结算。
 - 点击停止会停止排队和正在进行的请求，并保存已经收到的内容；用户取消不会把站点熔断或将模型误标为不可用。已提交的上游请求可能仍计入厂商额度。
 - 页面显示的“剩余”是站内请求上限，不是厂商真实余额。CF AI 的 Neurons、模型 token 预算等不能换算为准确请求次数。
-- 每小时第 17 分钟检查最多 12 条已启用线路的模型列表（普通线路 `/models`，Workers AI `/ai/models/search`），不发送推理请求。管理页也可手动检查。只检查连通性和鉴权，不证明模型可生成。
+- 服务每小时检查最多 12 条已启用线路的模型列表（普通线路 `/models`，Workers AI `/ai/models/search`），不发送推理请求。管理页也可手动检查。只检查连通性和鉴权，不证明模型可生成；原 Supabase 的网关定时任务已停用。
 - 不保存输入提示词。按用户要求，候选回复正文、来源站点、原始模型名、状态和 token 用量在私有后端保留 30 天；本人认证后才能读取。删除过期调用记录会同时删除候选正文。页面聊天历史保存在当前页面内存；退出清空。酒馆自身保存的聊天不受本网关 30 天清理影响。
 
 ## 安全
 
-- 所有网关表启用 RLS，并撤销 anon/authenticated 的表及 RPC 权限；后端 service_role 专用。
-- 上游密钥采用 AES-GCM 加密保存，默认从 Supabase 服务端 secret 派生加密密钥。浏览器提交后不会回显；只能看到 has_key。轮换 Supabase secret 前应设置独立的 `LING_GATEWAY_ENCRYPTION_KEY` 并重新录入线路密钥，避免旧密文无法解密。
+- 所有网关表启用 RLS，数据库只通过私有网络连接；后端数据库用户专用。原 Supabase 备份表继续禁止 anon/authenticated 访问。
+- 上游密钥采用 AES-GCM 加密保存，迁移时在服务器中重新加密。数据加密密钥由独立 `GATEWAY_MASTER_KEY` 加密后保存在数据库，主密钥仅在私有运行配置中保存。浏览器提交上游密钥后不会回显；只能看到 has_key。数据库备份与主密钥均需保留。
 - 网关应用密钥只存 SHA-256；显示一次，可撤销。管理会话 8 小时有效、仅在当前浏览器会话保存。退出撤销会话。
 - 管理访问码只在私有网关表保存 SHA-256 校验值，不发送到浏览器，不影响原网站门禁。尚未配置独立访问码的旧部署可兼容读取现有门禁哈希；登录次数通过数据库限制。已有网站的 API 配置没有读取、复制或修改。
 - 拒绝非 HTTPS、内网地址、URL 内嵌凭据和重定向；Supabase 运行时检查域名解析结果。域名解析检查不是对恶意 DNS 重绑定的完整网络隔离，只应配置你信任的上游。
-- 定时健康检查使用专门的监控密钥，保存在 Supabase Vault；它只能调用 `/internal/health`，没有管理权限。
+- 独立服务的内部定时任务直接调用已鉴权的服务代码，不向前端提供监控凭据。旧监控密钥仅可调用 `/internal/health`，没有管理权限。
 
 ## 开发与部署
 
@@ -104,16 +104,16 @@ npm run dev
 
 数据库结构依次为 `supabase/schema.sql`、`supabase/model-checks.sql`、`supabase/model-fanout.sql`、`supabase/routing-modes.sql`、`supabase/access-code.sql`，然后应用 `supabase/migrations/20261008094443_mapping_review_variant_ids.sql`；通过 Supabase migration API 应用并记录迁移历史，不要对已部署数据库重复执行脚本。最后一项允许保留假流式、抗截断、防截断的中文前缀；不改变数据库访问权限。`tests/schema-fanout.sql` 与 `tests/schema-routing.sql` 是可回滚的数据库不变量检查。
 
-`src/edge.ts`、`src/gateway.mjs`、`src/model-checks.mjs`、`src/model-directory.mjs`、`src/fanout.mjs` 和 `src/routing.mjs` 一起部署为 `ling-ai-gateway` Edge Function。必须关闭平台 JWT 验证，因为本项目采用自身 API key 验证，所有管理和模型接口均独立鉴权。`GET /v1/replies/{request_id}` 仅返回本人的保存结果；流式响应的 `x-gateway-request-id` 和结束摘要均包含该 ID。
+`src/edge.ts` 是旧 Supabase 地址的兼容转发入口，不再读写原库。必须关闭平台 JWT 验证，因为本项目采用自身 API key 验证，所有管理和模型接口在新后端独立鉴权。`GET /v1/replies/{request_id}` 仅返回本人的保存结果；流式响应的 `x-gateway-request-id` 和结束摘要均包含该 ID。
 
 GitHub Actions 部署 `public/` 到 Pages。公开文件只有页面程序和公开后端地址。
 
-以后有 Cloudflare 账号时，可将 `wrangler.toml` 部署到 Workers 免费计划，静态资源使用 `public/`，API 转发到现有 Supabase 后端；无需迁移密钥或数据库。Cloudflare Workers AI 模板本身需要 Cloudflare 账号和 API token，未注册时留关闭即可。
+Cloudflare Worker 的历史部署方案保留在仓库，当前生产入口使用 Northflank。Cloudflare Workers AI 上游模板本身需要 Cloudflare 账号和 API token，未注册时留关闭即可。
 
 ## 费用与适用范围
 
-本项目没有启用付费订阅、域名或付费模型。现有 Supabase 项目确认使用 Free 计划，容量与其他网站共享；免费配额、项目暂停政策及上游账号额度仍然适用，不承诺无限或永久免费。
+本次部署没有启用付费订阅、域名或付费附加项。Northflank 的服务与 PostgreSQL 均选择标注 Free 的规格。现有 Supabase Free 项目仍为其他网站运行，并保留迁移前的网关数据；免费配额、平台政策及上游账号额度仍然适用，不承诺无限或永久免费。
 
-成熟的 [New API](https://github.com/QuantumNous/new-api) 支持更多协议、计费和用户管理，但需要持续运行后端程序。当前方案针对无常开服务器、无需电脑在线的 Supabase 云端部署。以后迁移时可继续保留官方模型名称与统一连接方式。
+成熟的 [New API](https://github.com/QuantumNous/new-api) 支持更多协议、计费和用户管理；Northflank 具备持续运行其容器的条件。本次先完整保留现有自定义网关，新 API 前端和后台的功能融合需另行实现，参见 [融合方案](docs/new-api-integration.md)。
 
 官方接口参考：[Gemini](https://ai.google.dev/gemini-api/docs/openai)、[OpenRouter Free](https://openrouter.ai/docs/guides/routing/model-variants/free)、[Workers AI](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/)、[Supabase 定时任务](https://supabase.com/docs/guides/functions/schedule-functions)。

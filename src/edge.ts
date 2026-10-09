@@ -1,8 +1,12 @@
-import { createGateway } from './gateway.mjs';
-const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}').default;
-const env = { SUPABASE_URL: Deno.env.get('SUPABASE_URL'), SUPABASE_SERVICE_ROLE_KEY: secret, ENCRYPTION_KEY: Deno.env.get('LING_GATEWAY_ENCRYPTION_KEY') };
-const resolveDNS = async (host: string) => {
-  const results = await Promise.allSettled([Deno.resolveDns(host,'A'),Deno.resolveDns(host,'AAAA')]);
-  return results.flatMap(r=>r.status==='fulfilled'?r.value:[]);
-};
-Deno.serve(createGateway(env,{resolveDNS,totalTimeout:140000}));
+const target = 'https://p01--ling-ai-gateway--vbxqzx898zzq.code.run';
+Deno.serve(async (req: Request) => {
+  const url = new URL(req.url);
+  const path = url.pathname.replace(/^(?:\/functions\/v1)?\/ling-ai-gateway(?=\/|$)/, '') || '/';
+  const headers = new Headers(req.headers);
+  for (const name of ['host','cf-connecting-ip','x-forwarded-for','x-forwarded-host','x-forwarded-proto','connection','content-length']) headers.delete(name);
+  try {
+    return await fetch(target + path + url.search, {method:req.method,headers,body:['GET','HEAD'].includes(req.method)?undefined:req.body,redirect:'error',signal:req.signal});
+  } catch {
+    return Response.json({error:{code:'gateway_unavailable',type:'gateway_error',message:'新入口暂时无法连接，请稍后重试。'}},{status:503,headers:{'cache-control':'no-store','access-control-allow-origin':'*'}});
+  }
+});

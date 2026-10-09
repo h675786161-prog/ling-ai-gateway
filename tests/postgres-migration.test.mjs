@@ -48,6 +48,12 @@ test('PostgreSQL schema and binding preserve limits, JSON arrays, filtering, and
  await assert.rejects(db.table('models','?order=model_id.asc%3BDROP'),/invalid_database_order/);
  await assert.rejects(db.write('users','DELETE',{}),/unbounded_database_write/);
  assert.equal(await initializeSchema(pool),false);
+ const user=(await db.table('users'))[0];
+ const active=(await db.write('logs','POST',{user_id:user.id,model:'active-long-stream',status:'pending',started_at:new Date(Date.now()-10*60000).toISOString()}))[0];
+ const expired=(await db.write('logs','POST',{user_id:user.id,model:'expired-stream',status:'pending',started_at:new Date(Date.now()-80*60000).toISOString()}))[0];
+ await db.rpc('maintenance');
+ assert.equal((await db.table('logs','?id=eq.'+active.id))[0].status,'pending');
+ assert.equal((await db.table('logs','?id=eq.'+expired.id))[0].status,'failed');
 });
 
 test('encrypted migration preserves application keys, gate, mappings, replies, and usable upstream secrets',async t=>{
