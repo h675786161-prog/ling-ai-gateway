@@ -5,7 +5,6 @@ import {PostgresDB} from './postgres.mjs';
 import {createMigrationTarget} from './migration-target.mjs';
 import {createHTTPServer} from './http.mjs';
 import {createGateway} from '../src/gateway.mjs';
-import {deploymentTest} from './deployment-test.mjs';
 
 let startupStage='environment';
 async function start(){
@@ -22,12 +21,10 @@ async function start(){
  startupStage='migration_credentials';
  const migration=await createMigrationTarget({pool,masterKey:process.env.GATEWAY_MASTER_KEY,bootstrapToken:process.env.MIGRATION_IMPORT_TOKEN,onImported:activate});
  const key=await migration.load();if(key)activate(key);
- const deploymentFixture=deploymentTest(pool,process.env.MIGRATION_IMPORT_TOKEN);
  startupStage='http_server';
  const server=createHTTPServer({trustProxy:process.env.TRUST_PROXY==='true',handle:async req=>{
   const path=new URL(req.url).pathname;
   if(path==='/health'&&req.method==='GET'){await pool.query('select 1');return Response.json({ok:true,service:'ling-ai-gateway',version:'0.6.0',storage:'postgres',imported:migration.isImported()},{headers:{'cache-control':'no-store'}});}
-  const test=await deploymentFixture(req);if(test)return test;
   const imported=await migration.handle(req);if(imported)return imported;
   if(!gateway)return Response.json({error:{code:'migration_pending',message:'新入口正在准备中，请暂时继续使用原站。'}},{status:503});
   return gateway(req);
