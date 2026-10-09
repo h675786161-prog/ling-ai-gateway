@@ -15,7 +15,7 @@ async function start(){
  await initializeSchema(pool);
  const db=new PostgresDB(pool);let gateway=null;
  const resolveDNS=async host=>(await Promise.allSettled([resolve4(host),resolve6(host)])).flatMap(r=>r.status==='fulfilled'?r.value:[]);
- const activate=secret=>{gateway=createGateway({ENCRYPTION_KEY:secret},{db,resolveDNS});};
+ const activate=secret=>{gateway=createGateway({ENCRYPTION_KEY:secret},{db,resolveDNS,totalTimeout:60*60*1000});};
  const migration=await createMigrationTarget({pool,masterKey:process.env.GATEWAY_MASTER_KEY,bootstrapToken:process.env.MIGRATION_IMPORT_TOKEN,onImported:activate});
  const key=await migration.load();if(key)activate(key);
  const server=createHTTPServer({trustProxy:process.env.TRUST_PROXY==='true',handle:async req=>{
